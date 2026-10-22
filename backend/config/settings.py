@@ -1,6 +1,11 @@
 import os
+from dotenv import load_dotenv
 from pathlib import Path
 import dj_database_url
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+DEBUG = os.getenv("DEBUG", "False") == "True"
 BASE_DIR=Path(__file__).resolve().parent.parent
 SECRET_KEY=os.environ.get('DJANGO_SECRET_KEY','development-only-change-me')
 DEBUG=os.environ.get('DEBUG','1')=='1'
