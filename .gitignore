@@ -1,7 +1,30 @@
-**/__pycache__/
-**/*.pyc
-**/.env
-**/node_modules/
-**/dist/
-**/staticfiles/
+
+# Python virtual environments
 .venv/
+**/.venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python cache and compiled files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+**/*.pyc
+
+# Node.js dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+
+# Django generated files
+staticfiles/
+**/staticfiles/
