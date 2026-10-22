@@ -1,68 +1,233 @@
+
 from django.contrib.auth import authenticate
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import api_view,permission_classes
-from rest_framework.permissions import AllowAny,IsAuthenticated
-from rest_framework.response import Response
+
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-from .models import Fact,Rule,Draft,Version,Finding,Decision
-from .serializers import FactSerializer,RuleSerializer,DraftSerializer
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+
+from .models import Fact, Rule, Draft, Version, Finding, Decision
+from .serializers import FactSerializer, RuleSerializer, DraftSerializer
 from .engine import inspect
-@api_view(['POST'])
+
+
+def accessible_drafts(user):
+    """Staff can review all drafts; other users see only their own."""
+    queryset = Draft.objects.all()
+    if user.is_staff:
+        return queryset
+    return queryset.filter(author=user)
+
+
+@api_view(["POST"])
 @permission_classes([AllowAny])
 def login(request):
- user=authenticate(username=request.data.get('username'),password=request.data.get('password'))
- if not user:return Response({'error':'Invalid credentials'},status=400)
- token,_=Token.objects.get_or_create(user=user)
- return Response({'token':token.key,'username':user.username,'is_staff':user.is_staff})
-@api_view(['GET'])
+    user = authenticate(
+        username=request.data.get("username"),
+        password=request.data.get("password"),
+    )
+    if not user:
+        return Response(
+            {"error": "Invalid credentials"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    token, _ = Token.objects.get_or_create(user=user)
+    return Response({
+        "token": token.key,
+        "username": user.username,
+        "is_staff": user.is_staff,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def knowledge(request):
- return Response({'facts':FactSerializer(Fact.objects.all(),many=True).data,'rules':RuleSerializer(Rule.objects.all(),many=True).data})
-@api_view(['GET','POST'])
+    facts = Fact.objects.filter(status="approved")
+    rules = Rule.objects.all()
+    return Response({
+        "facts": FactSerializer(facts, many=True).data,
+        "rules": RuleSerializer(rules, many=True).data,
+    })
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
 def drafts(request):
- if request.method=='GET':return Response(DraftSerializer(Draft.objects.order_by('-created_at'),many=True).data)
- title=str(request.data.get('title','')).strip()[:200];content=str(request.data.get('content','')).strip()
- if not title or not content or len(content)>20000:return Response({'error':'Title and content (max 20,000 characters) required'},status=400)
- with transaction.atomic():
-  d=Draft.objects.create(title=title,content=content,author=request.user)
-  v=Version.objects.create(draft=d,content=content,version=1,editor=request.user)
-  for finding in inspect(content):Finding.objects.create(draft=d,version=v,**finding)
- return Response(DraftSerializer(d).data,status=201)
-@api_view(['GET'])
-def draft_detail(request,pk):
- return Response(DraftSerializer(get_object_or_404(Draft,pk=pk)).data)
-@api_view(['POST'])
-def revise(request,pk):
- d=get_object_or_404(Draft,pk=pk)
- if d.author_id!=request.user.id and not request.user.is_staff:return Response({'error':'Only author or staff can revise'},status=403)
- content=str(request.data.get('content','')).strip()
- if not content or len(content)>20000:return Response({'error':'Content required (max 20,000 characters)'},status=400)
- with transaction.atomic():
-  version=d.versions.count()+1
-  v=Version.objects.create(draft=d,content=content,version=version,editor=request.user)
-  d.content=content;d.status='in_review';d.save()
-  d.findings.filter(state='open').update(state='obsolete')
-  for finding in inspect(content):Finding.objects.create(draft=d,version=v,**finding)
-  Decision.objects.create(draft=d,actor=request.user,action='revised',comment=f'Created version {version}')
- return Response(DraftSerializer(d).data)
-@api_view(['POST'])
-def decide(request,pk,finding_id):
- d=get_object_or_404(Draft,pk=pk)
- f=get_object_or_404(Finding,pk=finding_id,draft=d)
- if f.state!='open':return Response({'error':'Finding is no longer open'},status=400)
- action=request.data.get('action')
- if action not in ['acknowledged','dismissed']:return Response({'error':'Choose acknowledged or dismissed'},status=400)
- f.state=action;f.save(update_fields=['state'])
- Decision.objects.create(draft=d,finding=f,actor=request.user,action=action,comment=str(request.data.get('comment',''))[:1000])
- return Response(DraftSerializer(d).data)
-@api_view(['POST'])
-def approve(request,pk):
- d=get_object_or_404(Draft,pk=pk)
- if not request.user.is_staff:return Response({'error':'Reviewer permission required'},status=403)
- if d.findings.filter(state='open').exists():return Response({'error':'Resolve all open findings before approval'},status=400)
- d.status='approved';d.save()
- Decision.objects.create(draft=d,actor=request.user,action='approved',comment=str(request.data.get('comment',''))[:1000])
- return Response(DraftSerializer(d).data)
-@api_view(['GET'])
-def health(request):return Response({'status':'ok'})
+    if request.method == "GET":
+        queryset = accessible_drafts(request.user).order_by("-created_at")
+        return Response(DraftSerializer(queryset, many=True).data)
+
+    title = str(request.data.get("title", "")).strip()[:200]
+    content = str(request.data.get("content", "")).strip()
+
+    if not title or not content or len(content) > 20000:
+        return Response(
+            {"error": "Title and content (max 20,000 characters) required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        draft = Draft.objects.create(
+            title=title,
+            content=content,
+            author=request.user,
+        )
+        version = Version.objects.create(
+            draft=draft,
+            content=content,
+            version=1,
+            editor=request.user,
+        )
+        for finding in inspect(content):
+            Finding.objects.create(
+                draft=draft,
+                version=version,
+                **finding,
+            )
+
+    return Response(
+        DraftSerializer(draft).data,
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def draft_detail(request, pk):
+    draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+    return Response(DraftSerializer(draft).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def revise(request, pk):
+    draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+
+    if draft.author_id != request.user.id and not request.user.is_staff:
+        return Response(
+            {"error": "Only author or staff can revise"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    content = str(request.data.get("content", "")).strip()
+    if not content or len(content) > 20000:
+        return Response(
+            {"error": "Content required (max 20,000 characters)"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        version_number = draft.versions.count() + 1
+        version = Version.objects.create(
+            draft=draft,
+            content=content,
+            version=version_number,
+            editor=request.user,
+        )
+
+        draft.content = content
+        draft.status = "in_review"
+        draft.save(update_fields=["content", "status", "updated_at"])
+
+        draft.findings.filter(state="open").update(state="obsolete")
+
+        for finding in inspect(content):
+            Finding.objects.create(
+                draft=draft,
+                version=version,
+                **finding,
+            )
+
+        Decision.objects.create(
+            draft=draft,
+            actor=request.user,
+            action="revised",
+            comment=f"Created version {version_number}",
+        )
+
+    return Response(DraftSerializer(draft).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def decide(request, pk, finding_id):
+    if not request.user.is_staff:
+        return Response(
+            {"error": "Reviewer permission required"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+    finding = get_object_or_404(
+        Finding,
+        pk=finding_id,
+        draft=draft,
+    )
+
+    if finding.state != "open":
+        return Response(
+            {"error": "Finding is no longer open"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    action = request.data.get("action")
+    if action not in ["acknowledged", "dismissed"]:
+        return Response(
+            {"error": "Choose acknowledged or dismissed"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    comment = str(request.data.get("comment", ""))[:1000]
+
+    with transaction.atomic():
+        finding.state = action
+        finding.save(update_fields=["state"])
+        Decision.objects.create(
+            draft=draft,
+            finding=finding,
+            actor=request.user,
+            action=action,
+            comment=comment,
+        )
+
+    return Response(DraftSerializer(draft).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def approve(request, pk):
+    if not request.user.is_staff:
+        return Response(
+            {"error": "Reviewer permission required"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+
+    if draft.findings.filter(state="open").exists():
+        return Response(
+            {"error": "Resolve all open findings before approval"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        draft.status = "approved"
+        draft.save(update_fields=["status", "updated_at"])
+        Decision.objects.create(
+            draft=draft,
+            actor=request.user,
+            action="approved",
+            comment=str(request.data.get("comment", ""))[:1000],
+        )
+
+    return Response(DraftSerializer(draft).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def health(request):
+    return Response({"status": "ok"})
