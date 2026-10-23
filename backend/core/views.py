@@ -43,6 +43,14 @@ def login(request):
     })
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def logout(request):
+    request.auth.delete()
+    return Response({"message": "Logged out successfully."})
+
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def knowledge(request):
@@ -238,6 +246,6 @@ def approve(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def health(request):
     return Response({"status": "ok"})

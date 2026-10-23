@@ -1,4 +1,4 @@
-import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal}from"lucide-react";import{api}from"./lib/api.js";
+import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut}from"lucide-react";import{api}from"./lib/api.js";
 
 const seed="Introducing PayNest Smart Savings. Earn 7% returns with our guaranteed, risk-free savings plan. Open your account today and start growing your money with confidence.";
 
@@ -13,20 +13,44 @@ function Pill({children,tone=""}){return <span className={`pill ${tone}`}><i/>{c
 function Stat({label,value,note,Icon,delay=0}){return <motion.div className="stat" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay}}><div className="stat-label">{label}<span><Icon size={16}/></span></div><strong>{value}</strong><small>{note}</small></motion.div>}
 
 function mapBackendFindings(items){
-  return (Array.isArray(items) ? items : []).map(f => ({
-    id: String(f.id),
-    backendId: f.id,
-    kind: f.kind || "Policy rule",
-    excerpt: f.excerpt || "",
-    term: f.excerpt || "",
-    severity: /critical|absolute|guarantee|rate|claim/i.test(`${f.kind || ""} ${f.reason || ""}`) ? "critical" : "high",
-    type: f.kind || "Policy rule",
-    title: f.kind || "Review finding",
-    detail: f.reason || "Review this content against the brand rules.",
-    source: f.source || "Backend rulebook",
-    suggestion: f.suggestion || "Review and revise this claim.",
-    state: f.state || "open"
-  }));
+  const labels = {
+    prohibited_term: {
+      type: "Prohibited language",
+      title: "Potentially prohibited claim",
+    },
+    fact_mismatch: {
+      type: "Fact mismatch",
+      title: "Unverified or inconsistent fact",
+    },
+  };
+
+  return (Array.isArray(items) ? items : [])
+    .filter((f) => f.state !== "obsolete")
+    .map((f) => {
+      const label = labels[f.kind] || {
+        type: "Content review",
+        title: "Review finding",
+      };
+
+      return {
+        id: String(f.id),
+        backendId: f.id,
+        kind: f.kind || "Policy rule",
+        excerpt: f.excerpt || "",
+        term: f.excerpt || "",
+        severity: /critical|absolute|guarantee|rate|claim/i.test(
+          `${f.kind || ""} ${f.reason || ""}`
+        )
+          ? "critical"
+          : "high",
+        type: label.type,
+        title: label.title,
+        detail: f.reason || "Review this content against the brand rules.",
+        source: f.source || "Backend rulebook",
+        suggestion: f.suggestion || "Review and revise this claim.",
+        state: f.state || "open",
+      };
+    });
 }
 
 export default function App(){
@@ -54,6 +78,29 @@ async function login(e){
     setLoginBusy(false);
   }
 }
+
+
+async function logout() {
+  try {
+    await api.logout();
+  } catch (error) {
+    console.error("Logout request failed:", error);
+  }
+
+  setAuthenticated(false);
+  setLoginUsername("");
+  setLoginPassword("");
+  setLoginError("");
+  setBackendDraftId(null);
+  setFindings([]);
+  setResolved([]);
+  setActive(null);
+  setDecision("");
+  setStatus("Not reviewed");
+  setApiMode(api.configured ? "API configured" : "Demo mode");
+  setToast("");
+}
+
 
 async function review(){
   if(!draft.trim()){
@@ -221,7 +268,7 @@ return <div className={`app theme-${theme}`}>
 
 {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close navigation"/>}
 
-<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><span className="api-state"><i/>{apiMode}</span><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><button className="icon-btn" title="Notifications" onClick={()=>setToast("You're all caught up.")}><Bell size={17}/></button><b className="avatar">JS</b></div></header>
+<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><span className="api-state"><i/>{apiMode}</span><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><button className="icon-btn" title="Notifications" onClick={()=>setToast("You're all caught up.")}><Bell size={17}/></button><button className="icon-btn" title="Log out" aria-label="Log out" onClick={logout}><LogOut size={17}/></button><b className="avatar">JS</b></div></header>
 
 <div className="content"><AnimatePresence mode="wait">
 

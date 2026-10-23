@@ -1,4 +1,3 @@
-
 const BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api"
 ).replace(/\/+$/, "");
@@ -49,13 +48,21 @@ export const api = {
       body: JSON.stringify({ username, password }),
     });
 
+    if (!data?.token) {
+      throw new Error("Login succeeded without returning an authentication token.");
+    }
+
     localStorage.setItem(TOKEN_KEY, data.token);
     return data;
   },
 
-  logout() {
+  async logout() {
+  try {
+    await request("/logout/", { method: "POST" });
+  } finally {
     localStorage.removeItem(TOKEN_KEY);
-  },
+  }
+},
 
   listDrafts() {
     return request("/drafts/");
