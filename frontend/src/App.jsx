@@ -1,4 +1,4 @@
-import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw}from"lucide-react";import{api}from"./lib/api.js";
+import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
 
 const seed="Introducing PayNest Smart Savings. Earn 7% returns with our guaranteed, risk-free savings plan. Open your account today and start growing your money with confidence.";
 
@@ -55,7 +55,7 @@ function mapBackendFindings(items){
 
 export default function App(){
 
-const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=localStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>localStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>localStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>localStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState("");
+const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=localStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>localStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>localStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>localStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false);
 
 useEffect(()=>localStorage.setItem("bl-theme",theme),[theme]);
 useEffect(()=>localStorage.setItem("bl-page",page),[page]);
@@ -73,6 +73,49 @@ async function refreshSavedDrafts(){
   } finally {
     setLoadingSavedDrafts(false);
   }
+}
+
+function toggleDraftSelection(id){
+  setSelectedDraftIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+}
+
+function selectableDrafts(items=savedDrafts){
+  return items.filter(item => item.status !== "approved");
+}
+
+function selectAllVisibleDrafts(items){
+  const ids = selectableDrafts(items).map(item => item.id);
+  setSelectedDraftIds(current => ids.every(id => current.includes(id)) && ids.length ? current.filter(id => !ids.includes(id)) : [...new Set([...current, ...ids])]);
+}
+
+async function deleteSelectedDrafts(deleteAll=false){
+  if(!authenticated || deletingDrafts) return;
+  const targets = deleteAll ? selectableDrafts(savedDrafts) : savedDrafts.filter(item => selectedDraftIds.includes(item.id) && item.status !== "approved");
+  if(!targets.length){ setToast("Select at least one non-approved draft to delete."); return; }
+  const approvedCount = savedDrafts.filter(item => item.status === "approved").length;
+  const message = deleteAll
+    ? `Delete all ${targets.length} non-approved draft(s)? Approved drafts (${approvedCount}) are protected. This permanently removes their versions, findings, and decision history.`
+    : `Delete ${targets.length} selected draft(s)? Approved drafts are protected. This permanently removes the selected drafts and their versions, findings, and decision history.`;
+  if(!window.confirm(message)) return;
+  setDeletingDrafts(true);
+  let deleted = 0;
+  const errors = [];
+  const deletedIds = new Set();
+  try {
+    for(const item of targets){
+      try { await api.deleteDraft(item.id); deleted += 1; deletedIds.add(item.id); }
+      catch(error){ errors.push(`${item.title || `Draft ${item.id}`}: ${error.message || "Delete failed"}`); }
+    }
+    setSelectedDraftIds(current => current.filter(id => !deletedIds.has(id)));
+    if(backendDraftId != null && deletedIds.has(Number(backendDraftId))){
+      setBackendDraftId(null); localStorage.removeItem("bl-last-draft-id");
+      setDraft(""); setTitle("Untitled campaign draft"); setFindings([]); setResolved([]); setActive(null); setDecision(""); setStatus("Not reviewed");
+      setPage("overview"); localStorage.setItem("bl-page", "overview");
+    }
+    await refreshSavedDrafts();
+    setToast(errors.length ? `${deleted} draft(s) deleted; ${errors.length} could not be deleted.` : `${deleted} draft(s) deleted.`);
+    if(errors.length) console.warn("Some drafts could not be deleted:", errors);
+  } finally { setDeletingDrafts(false); }
 }
 
 useEffect(()=>{
@@ -393,7 +436,7 @@ return <div className={`app theme-${theme}`}>
     </button>)}
     <button onClick={()=>{setWorkspaceOpen(false);setToast("PayNest is the only workspace configured in this local demo. Multi-workspace switching can be added when separate workspaces are supported.")}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px",width:"100%",marginTop:"8px",padding:"10px",border:"1px solid #3b4356",borderRadius:"9px",background:"rgba(255,255,255,.025)",color:"#dce3f3",fontSize:"12px",fontWeight:700,cursor:"pointer"}}><Settings2 size={14}/> Workspace details <ArrowUpRight size={13}/></button>
   </div>}
-</div><div className="nav-label">WORKSPACE</div>{nav.slice(0,2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="nav-label spaced">GOVERNANCE</div>{nav.slice(2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div><button type="button" className="user" onClick={()=>setProfileOpen(v=>!v)} aria-label="Open user profile menu" style={{width:"100%",textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}><b>{(currentUsername||"BL").slice(0,2).toUpperCase()}</b><span><strong>{currentUsername||"Signed-in user"}</strong><small>{isStaff?"Brand reviewer":"Content creator"}</small></span><MoreHorizontal size={18}/></button></div></aside>
+</div><div className="nav-label">WORKSPACE</div>{nav.slice(0,2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="nav-label spaced">GOVERNANCE</div>{nav.slice(2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div></div></aside>
 
 {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close navigation"/>}
 
@@ -416,25 +459,37 @@ return <div className={`app theme-${theme}`}>
 {history&&<motion.div className="history-strip" initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}}><b><GitCompareArrows size={15}/> Saved versions <small>{versions.length} versions</small></b><div>{versions.map((v,i)=><button key={i} onClick={()=>{setDraft(v.text);setToast(v.name+" restored")}}><strong>{v.name}</strong><small>{v.time}</small></button>)}</div></motion.div>}
 
 <section className="panel" style={{padding:"13px 16px",marginBottom:"14px"}}>
-  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px"}}>
+  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px",flexWrap:"wrap"}}>
     <div style={{display:"flex",alignItems:"center",gap:"10px",minWidth:0}}>
       <span style={{width:"34px",height:"34px",borderRadius:"10px",display:"grid",placeItems:"center",background:"rgba(117,132,255,.12)",color:"#9da8ff",flexShrink:0}}><FolderOpen size={17}/></span>
       <div style={{minWidth:0}}><b style={{fontSize:"14px"}}>Saved drafts <span style={{fontSize:"11px",fontWeight:600,opacity:.7,marginLeft:"5px"}}>{savedDrafts.length}</span></b><div style={{fontSize:"12px",opacity:.68,marginTop:"3px"}}>Your drafts, saved in the backend.</div></div>
     </div>
-    <div style={{display:"flex",alignItems:"center",gap:"7px",flexShrink:0}}>
-      <button className="icon-btn" title="Refresh saved drafts" onClick={refreshSavedDrafts} disabled={loadingSavedDrafts} style={{width:"32px",height:"32px"}}>{loadingSavedDrafts?<span className="spinner"/>:<RefreshCw size={14}/>}</button>
-      {savedDrafts.length>3&&<Btn onClick={()=>setShowAllSavedDrafts(v=>!v)}>{showAllSavedDrafts?"Show recent":"View all drafts"} <ChevronDown size={14}/></Btn>}
+    <div style={{display:"flex",alignItems:"center",gap:"7px",flexWrap:"wrap",flexShrink:0}}>
+      <button className="icon-btn" title="Refresh saved drafts" onClick={refreshSavedDrafts} disabled={loadingSavedDrafts || deletingDrafts} style={{width:"32px",height:"32px"}}>{loadingSavedDrafts?<span className="spinner"/>:<RefreshCw size={14}/>}</button>
+      {savedDrafts.length>0&&<Btn onClick={()=>{setShowAllSavedDrafts(v=>!v);setSelectedDraftIds([])}}>{showAllSavedDrafts?"Show recent":"Manage drafts"} <ChevronDown size={14}/></Btn>}
     </div>
   </div>
   {savedDrafts.length===0
     ? <div style={{marginTop:"12px",padding:"12px",borderRadius:"10px",border:"1px dashed var(--border, #343a49)",fontSize:"12px",opacity:.75}}>{loadingSavedDrafts?"Loading saved drafts…":authenticated?"No saved drafts yet. Run a review to save your first draft.":"Sign in to load saved drafts."}</div>
     : <>
-      {showAllSavedDrafts&&<input aria-label="Search saved drafts" value={savedDraftSearch} onChange={e=>setSavedDraftSearch(e.target.value)} placeholder="Search drafts by title or status…" style={{width:"100%",marginTop:"12px",padding:"9px 11px",borderRadius:"9px",border:"1px solid var(--border, #343a49)",background:"transparent",color:"inherit",fontSize:"12px",boxSizing:"border-box"}}/>}
+      {showAllSavedDrafts&&<>
+        <input aria-label="Search saved drafts" value={savedDraftSearch} onChange={e=>setSavedDraftSearch(e.target.value)} placeholder="Search drafts by title or status…" style={{width:"100%",marginTop:"12px",padding:"9px 11px",borderRadius:"9px",border:"1px solid var(--border, #343a49)",background:"transparent",color:"inherit",fontSize:"12px",boxSizing:"border-box"}}/>
+        <div style={{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap",marginTop:"10px"}}>
+          <button type="button" onClick={()=>selectAllVisibleDrafts(savedDrafts.filter(item=>`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())))} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"7px 9px",border:"1px solid var(--border, #343a49)",borderRadius:"8px",background:"transparent",color:"inherit",fontSize:"11px",cursor:"pointer"}}><CheckSquare size={13}/> Select all eligible</button>
+          <span style={{fontSize:"11px",opacity:.72}}>{selectedDraftIds.filter(id=>savedDrafts.some(item=>item.id===id && item.status!=="approved")).length} selected · approved drafts are protected</span>
+          <span style={{flex:1}}/>
+          <Btn disabled={deletingDrafts || selectedDraftIds.length===0} onClick={()=>deleteSelectedDrafts(false)}><Trash2 size={13}/> {deletingDrafts?"Deleting…":"Delete selected"}</Btn>
+          <button type="button" disabled={deletingDrafts || selectableDrafts(savedDrafts).length===0} onClick={()=>deleteSelectedDrafts(true)} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"8px 10px",border:"1px solid rgba(232,121,137,.4)",borderRadius:"9px",background:"rgba(232,121,137,.08)",color:"#e87989",fontSize:"11px",fontWeight:700,cursor:deletingDrafts?"wait":"pointer",opacity:deletingDrafts?0.6:1}}><Trash2 size={13}/> Delete all eligible</button>
+        </div>
+      </>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:"8px",marginTop:"12px"}}>
-        {savedDrafts.filter(item=>!showAllSavedDrafts||`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).slice(0,showAllSavedDrafts?savedDrafts.length:3).map(item=><button key={item.id} onClick={()=>openSavedDraft(item.id)} style={{display:"flex",alignItems:"center",gap:"10px",textAlign:"left",padding:"10px 11px",borderRadius:"10px",border:"1px solid var(--border, #343a49)",background:"rgba(255,255,255,.018)",color:"inherit",cursor:"pointer",minWidth:0,transition:"border-color .18s, background .18s"}}>
-          <span style={{width:"30px",height:"30px",borderRadius:"8px",display:"grid",placeItems:"center",background:"rgba(255,255,255,.045)",flexShrink:0}}><FileText size={15}/></span>
-          <span style={{display:"block",minWidth:0,flex:1}}><b style={{display:"block",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title || `Draft ${item.id}`}</b><small style={{display:"block",opacity:.68,marginTop:"4px",fontSize:"10px"}}>#{item.id} · {item.status || "saved"}</small></span><ChevronRight size={14} style={{opacity:.6,flexShrink:0}}/>
-        </button>)}
+        {savedDrafts.filter(item=>!showAllSavedDrafts||`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).slice(0,showAllSavedDrafts?savedDrafts.length:3).map(item=><div key={item.id} style={{display:"flex",alignItems:"center",gap:"8px",textAlign:"left",padding:"8px",borderRadius:"10px",border:"1px solid var(--border, #343a49)",background:"rgba(255,255,255,.018)",minWidth:0,transition:"border-color .18s, background .18s"}}>
+          {showAllSavedDrafts&&<input type="checkbox" aria-label={`Select ${item.title||`draft ${item.id}`}`} checked={selectedDraftIds.includes(item.id)} disabled={item.status==="approved"||deletingDrafts} onChange={()=>toggleDraftSelection(item.id)} title={item.status==="approved"?"Approved drafts are protected from deletion":"Select draft"} style={{accentColor:"#9da8ff",flexShrink:0}}/>}
+          <button type="button" onClick={()=>openSavedDraft(item.id)} style={{display:"flex",alignItems:"center",gap:"9px",textAlign:"left",padding:"3px",border:0,background:"transparent",color:"inherit",cursor:"pointer",minWidth:0,flex:1}}>
+            <span style={{width:"30px",height:"30px",borderRadius:"8px",display:"grid",placeItems:"center",background:"rgba(255,255,255,.045)",flexShrink:0}}><FileText size={15}/></span>
+            <span style={{display:"block",minWidth:0,flex:1}}><b style={{display:"block",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title || `Draft ${item.id}`}</b><small style={{display:"block",opacity:.68,marginTop:"4px",fontSize:"10px"}}>#{item.id} · {item.status || "saved"}{item.status==="approved"?" · protected":""}</small></span><ChevronRight size={14} style={{opacity:.6,flexShrink:0}}/>
+          </button>
+        </div>)}
       </div>
       {showAllSavedDrafts&&savedDrafts.filter(item=>`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).length===0&&<small style={{display:"block",marginTop:"10px",opacity:.7}}>No drafts match that search.</small>}
     </>}

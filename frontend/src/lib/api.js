@@ -1,3 +1,4 @@
+
 const BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api"
 ).replace(/\/+$/, "");
@@ -21,7 +22,9 @@ async function request(path, options = {}) {
   });
 
   const data =
-    response.status === 204 ? null : await response.json().catch(() => null);
+    response.status === 204
+      ? null
+      : await response.json().catch(() => null);
 
   if (!response.ok) {
     throw new Error(
@@ -49,20 +52,30 @@ export const api = {
     });
 
     if (!data?.token) {
-      throw new Error("Login succeeded without returning an authentication token.");
+      throw new Error(
+        "Login succeeded without returning an authentication token."
+      );
     }
 
     localStorage.setItem(TOKEN_KEY, data.token);
+    localStorage.setItem("bl-username", data.username || username);
+    localStorage.setItem(
+      "bl-is-staff",
+      String(Boolean(data.is_staff))
+    );
+
     return data;
   },
 
   async logout() {
-  try {
-    await request("/logout/", { method: "POST" });
-  } finally {
-    localStorage.removeItem(TOKEN_KEY);
-  }
-},
+    try {
+      await request("/logout/", { method: "POST" });
+    } finally {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem("bl-username");
+      localStorage.removeItem("bl-is-staff");
+    }
+  },
 
   listDrafts() {
     return request("/drafts/");
@@ -84,17 +97,18 @@ export const api = {
   },
 
   revise(id, content) {
-    return request(`/drafts/${encodeURIComponent(id)}/revise/`, {
-      method: "POST",
-      body: JSON.stringify({ content }),
-    });
+    return request(
+      `/drafts/${encodeURIComponent(id)}/revise/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }
+    );
   },
 
   decide(draftId, findingId, action, comment = "") {
     return request(
-      `/drafts/${encodeURIComponent(draftId)}/findings/${encodeURIComponent(
-        findingId
-      )}/decide/`,
+      `/drafts/${encodeURIComponent(draftId)}/findings/${encodeURIComponent(findingId)}/decide/`,
       {
         method: "POST",
         body: JSON.stringify({ action, comment }),
@@ -103,9 +117,19 @@ export const api = {
   },
 
   approve(draftId, comment = "") {
-    return request(`/drafts/${encodeURIComponent(draftId)}/approve/`, {
-      method: "POST",
-      body: JSON.stringify({ comment }),
+    return request(
+      `/drafts/${encodeURIComponent(draftId)}/approve/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ comment }),
+      }
+    );
+  },
+
+  // Permanently delete one draft through the Django backend.
+  deleteDraft(id) {
+    return request(`/drafts/${encodeURIComponent(id)}/`, {
+      method: "DELETE",
     });
   },
 };
