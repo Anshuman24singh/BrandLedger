@@ -55,9 +55,67 @@ function mapBackendFindings(items){
 
 export default function App(){
 
-const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState("overview"),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(null);
+const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=localStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>localStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>localStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>localStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false);
 
-useEffect(()=>localStorage.setItem("bl-theme",theme),[theme]);useEffect(()=>{if(toast){let t=setTimeout(()=>setToast(""),3000);return()=>clearTimeout(t)}},[toast]);
+useEffect(()=>localStorage.setItem("bl-theme",theme),[theme]);
+useEffect(()=>localStorage.setItem("bl-page",page),[page]);
+useEffect(()=>{if(toast){let t=setTimeout(()=>setToast(""),3000);return()=>clearTimeout(t)}},[toast]);
+
+async function refreshSavedDrafts(){
+  if(!authenticated) return;
+  setLoadingSavedDrafts(true);
+  try {
+    const response = await api.listDrafts();
+    const items = Array.isArray(response) ? response : (response?.results || response?.drafts || []);
+    setSavedDrafts(items);
+  } catch(error) {
+    console.error("Could not load saved drafts:", error);
+  } finally {
+    setLoadingSavedDrafts(false);
+  }
+}
+
+useEffect(()=>{
+  if(!authenticated) return;
+  let cancelled = false;
+  async function loadWorkspace(){
+    try {
+      const response = await api.listDrafts();
+      const items = Array.isArray(response) ? response : (response?.results || response?.drafts || []);
+      if(!cancelled) setSavedDrafts(items);
+    } catch(error) {
+      console.error("Could not load saved drafts:", error);
+    }
+
+    const savedId = localStorage.getItem("bl-last-draft-id");
+    const savedPage = localStorage.getItem("bl-page");
+    if(savedId && savedPage === "reviews"){
+      try {
+        const saved = await api.getDraft(savedId);
+        if(cancelled) return;
+        setBackendDraftId(saved.id);
+        setTitle(saved.title || "Untitled campaign draft");
+        setDraft(saved.content || "");
+        setCampaign("Saved campaign");
+        const list = mapBackendFindings(saved.findings);
+        setFindings(list);
+        setActive(list[0]?.id || null);
+        setResolved(list.filter(f => f.state === "dismissed").map(f => f.id));
+        setStatus(saved.status === "approved" ? "Approved" :
+          list.some(f => f.state === "open" || f.state === "acknowledged") ? "Changes requested" : "Ready for review");
+        setPage("reviews");
+      } catch(error) {
+        console.error("Could not restore the last draft:", error);
+        if(!cancelled) {
+          localStorage.removeItem("bl-last-draft-id");
+          setBackendDraftId(null);
+        }
+      }
+    }
+  }
+  loadWorkspace();
+  return ()=>{cancelled = true;};
+},[authenticated]);
 
 const activeFinding=findings.find(f=>f.id===active),open=findings.filter(f=>!resolved.includes(f.id)),completion=findings.length?Math.round(resolved.length/findings.length*100):0;
 
@@ -68,7 +126,12 @@ async function login(e){
   setLoginBusy(true);
   setLoginError("");
   try {
-    await api.login(loginUsername.trim(), loginPassword);
+    const loginData = await api.login(loginUsername.trim(), loginPassword);
+    const username = loginData.username || loginUsername.trim();
+    setCurrentUsername(username);
+    setIsStaff(Boolean(loginData.is_staff));
+    localStorage.setItem("bl-username", username);
+    localStorage.setItem("bl-is-staff", String(Boolean(loginData.is_staff)));
     setAuthenticated(true);
     setLoginPassword("");
     setApiMode("API connected");
@@ -88,6 +151,10 @@ async function logout() {
   }
 
   setAuthenticated(false);
+  setCurrentUsername("");
+  setIsStaff(false);
+  localStorage.removeItem("bl-username");
+  localStorage.removeItem("bl-is-staff");
   setLoginUsername("");
   setLoginPassword("");
   setLoginError("");
@@ -122,7 +189,8 @@ async function review(){
       ? await api.revise(backendDraftId, draft)
       : await api.createDraft({title, content: draft});
 
-    if (result?.id != null) setBackendDraftId(result.id);
+    if (result?.id != null) { setBackendDraftId(result.id); localStorage.setItem("bl-last-draft-id", String(result.id)); }
+    await refreshSavedDrafts();
     const list = mapBackendFindings(result?.findings);
     setFindings(list);
     setActive(list[0]?.id || null);
@@ -176,7 +244,8 @@ async function apply(f){
       setFindings(list);
       setActive(list[0]?.id || null);
       setResolved(list.filter(x => x.state === "dismissed").map(x => x.id));
-      setStatus(list.some(x => x.state === "open") ? "Changes requested" : "Ready for review");
+      setStatus(list.some(x => x.state === "open" || x.state === "acknowledged") ? "Changes requested" : "Ready for review");
+      await refreshSavedDrafts();
       setToast("Suggestion applied and revision saved to the backend.");
       return;
     } catch (error) {
@@ -199,6 +268,7 @@ async function markReviewed(f){
     await api.decide(backendDraftId, f.backendId, "dismissed", comment);
     setResolved(r => [...new Set([...r, f.id])]);
     setFindings(items => items.map(x => x.id === f.id ? {...x, state:"dismissed"} : x));
+    await refreshSavedDrafts();
     setToast("Finding dismissed and saved to the backend.");
   } catch (error) {
     setToast(error.message || "Could not save this finding decision.");
@@ -215,7 +285,8 @@ async function decide(d){
       const result = await api.approve(backendDraftId, comment);
       setDecision("approved");
       setStatus("Approved");
-      setToast(result?.message || "Draft approval saved to the backend.");
+      await refreshSavedDrafts();
+       setToast(result?.message || "Draft approval saved to the backend.");
     } catch (error) {
       setToast(error.message || "Approval failed. Resolve all findings first.");
     }
@@ -227,6 +298,29 @@ async function decide(d){
   setToast("This backend currently supports approval and finding decisions; whole-draft rejection and request-changes are not implemented yet.");
 }
 
+async function openSavedDraft(id){
+  try {
+    const saved = await api.getDraft(id);
+    setBackendDraftId(saved.id);
+    localStorage.setItem("bl-last-draft-id", String(saved.id));
+    setTitle(saved.title || "Untitled campaign draft");
+    setDraft(saved.content || "");
+    setCampaign("Saved campaign");
+    const list = mapBackendFindings(saved.findings);
+    setFindings(list);
+    setActive(list[0]?.id || null);
+    setResolved(list.filter(f => f.state === "dismissed").map(f => f.id));
+    setStatus(saved.status === "approved" ? "Approved" :
+      list.some(f => f.state === "open" || f.state === "acknowledged") ? "Changes requested" : "Ready for review");
+    setDecision("");
+    setPage("reviews");
+    localStorage.setItem("bl-page", "reviews");
+    setToast("Saved draft loaded.");
+  } catch(error) {
+    setToast(error.message || "Could not open the saved draft.");
+  }
+}
+
 function newDraft(){
   setTitle("Untitled campaign draft");
   setCampaign("New campaign");
@@ -235,6 +329,7 @@ function newDraft(){
   setActive(null);
   setResolved([]);
   setBackendDraftId(null);
+  localStorage.removeItem("bl-last-draft-id");
   setStatus("Not reviewed");
   setDecision("");
   setPage("reviews");
@@ -264,15 +359,15 @@ if (!authenticated) {
 
 return <div className={`app theme-${theme}`}>
 
-<aside className={`sidebar ${mobile?"mobile":""}`}><div className="logo"><span className="logo-mark"><ShieldCheck size={21}/></span><span className="logo-type">BrandLedger<small>BRAND GOVERNANCE</small></span><button className="close-mobile" onClick={()=>setMobile(false)}><X size={17}/></button></div><button className="workspace"><b>P</b><span><strong>PayNest</strong><small>Demo workspace</small></span><ChevronDown size={15}/></button><div className="nav-label">WORKSPACE</div>{nav.slice(0,2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}{id==="reviews"&&<small>04</small>}</button>)}<div className="nav-label spaced">GOVERNANCE</div>{nav.slice(2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div><div className="user"><b>JS</b><span><strong>Jaiveer Singh</strong><small>Brand reviewer</small></span><MoreHorizontal size={18}/></div></div></aside>
+<aside className={`sidebar ${mobile?"mobile":""}`}><div className="logo"><span className="logo-mark"><ShieldCheck size={21}/></span><span className="logo-type">BrandLedger<small>BRAND GOVERNANCE</small></span><button className="close-mobile" onClick={()=>setMobile(false)}><X size={17}/></button></div><button className="workspace"><b>P</b><span><strong>PayNest</strong><small>Demo workspace</small></span><ChevronDown size={15}/></button><div className="nav-label">WORKSPACE</div>{nav.slice(0,2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}{id==="reviews"&&<small>04</small>}</button>)}<div className="nav-label spaced">GOVERNANCE</div>{nav.slice(2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div><div className="user"><b>{(currentUsername||"BL").slice(0,2).toUpperCase()}</b><span><strong>{currentUsername||"Signed-in user"}</strong><small>{isStaff?"Brand reviewer":"Content creator"}</small></span><MoreHorizontal size={18}/></div></div></aside>
 
 {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close navigation"/>}
 
-<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><span className="api-state"><i/>{apiMode}</span><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><button className="icon-btn" title="Notifications" onClick={()=>setToast("You're all caught up.")}><Bell size={17}/></button><button className="icon-btn" title="Log out" aria-label="Log out" onClick={logout}><LogOut size={17}/></button><b className="avatar">JS</b></div></header>
+<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><span className="api-state"><i/>{apiMode}</span><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><button className="icon-btn" title="Notifications" onClick={()=>setToast("You're all caught up.")}><Bell size={17}/></button><button className="icon-btn" title="Log out" aria-label="Log out" onClick={logout}><LogOut size={17}/></button><b className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</b></div></header>
 
 <div className="content"><AnimatePresence mode="wait">
 
-{page==="overview"&&<motion.section key="overview" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"> <i/> TUESDAY, OCTOBER 22, 2026</div><h1>Good morning, Jaiveer <em>✳</em></h1><p>Your brand's first line of defence starts here.</p></div><Btn kind="primary" onClick={newDraft}><Plus size={16}/> New content review</Btn></div>
+{page==="overview"&&<motion.section key="overview" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"> <i/> TUESDAY, OCTOBER 22, 2026</div><h1>Good morning, {currentUsername||"there"} <em>✳</em></h1><p>Your brand's first line of defence starts here.</p></div><Btn kind="primary" onClick={newDraft}><Plus size={16}/> New content review</Btn></div>
 
 <div className="hero"><div className="hero-copy"><span><Sparkles size={14}/> BRAND INTELLIGENCE</span><h2>Consistency isn't a coincidence.<br/><em>It's a system.</em></h2><p>Every claim checked. Every decision traceable. Every voice on-brand.</p><button onClick={()=>setPage("reviews")}>Open review studio <ArrowRight size={15}/></button></div><div className="orbit-art"><div className="orbit o1"/><div className="orbit o2"/><div className="orbit o3"/><div className="core"><ShieldCheck size={36}/></div><label>✓ VERIFIED FACTS</label><label>⌑ HUMAN REVIEW</label><label>↗ LIVE TRACE</label></div></div>
 
@@ -286,6 +381,20 @@ return <div className={`app theme-${theme}`}>
 
 {history&&<motion.div className="history-strip" initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}}><b><GitCompareArrows size={15}/> Saved versions <small>{versions.length} versions</small></b><div>{versions.map((v,i)=><button key={i} onClick={()=>{setDraft(v.text);setToast(v.name+" restored")}}><strong>{v.name}</strong><small>{v.time}</small></button>)}</div></motion.div>}
 
+<section className="panel" style={{padding:"14px 16px",marginBottom:"14px"}}>
+  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px",marginBottom:"10px"}}>
+    <div><b style={{fontSize:"14px"}}>Saved drafts</b><div style={{fontSize:"12px",opacity:.7,marginTop:"3px"}}>Open a draft saved in your backend database.</div></div>
+    <Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}>{loadingSavedDrafts?"Refreshing…":"Refresh list"}</Btn>
+  </div>
+  {savedDrafts.length===0
+    ? <small style={{opacity:.7}}>{loadingSavedDrafts?"Loading saved drafts…":"No saved drafts returned yet. Run a review to save a draft here."}</small>
+    : <div style={{display:"flex",flexWrap:"wrap",gap:"8px"}}>
+        {savedDrafts.map(item=><button key={item.id} onClick={()=>openSavedDraft(item.id)} style={{textAlign:"left",padding:"8px 10px",borderRadius:"8px",border:"1px solid var(--border, #343a49)",background:"transparent",color:"inherit",cursor:"pointer",maxWidth:"100%"}}>
+          <b style={{display:"block",fontSize:"12px"}}>{item.title || `Draft ${item.id}`}</b>
+          <small style={{display:"block",opacity:.7,marginTop:"3px"}}>#{item.id} · {item.status || "saved"}</small>
+        </button>)}
+      </div>}
+</section>
 <div className="docbar"><span className="file-icon"><FileText size={17}/></span><span className="docname"><b>{title}</b><small>{campaign} · Last edited just now</small></span><button className="icon-btn" title="Rename draft" onClick={()=>{let t=prompt("Rename draft",title);if(t?.trim())setTitle(t.trim())}}><Settings2 size={15}/></button><Pill tone={status==="Approved"?"good":status==="Not reviewed"?"": "warn"}>{status}</Pill></div>
 
 <div className={`review-grid ${!showEvidence?"wide":""}`}><section className="panel editor"><div className="editor-head"><span><i/> CONTENT DRAFT <small>· Plain text</small></span><button onClick={()=>setShowEvidence(v=>!v)}><PanelRightClose size={15}/></button></div><div className="fields"><label>CONTENT TITLE<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>CAMPAIGN<input value={campaign} onChange={e=>setCampaign(e.target.value)}/></label></div><label className="draft-label">Draft content <small>· {draft.trim()?draft.trim().split(/\s+/).length:0} words</small></label><textarea className="draft" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Paste campaign copy here…" spellCheck/><div className="editor-foot"><span><LockKeyhole size={13}/> Original stays unchanged until you apply a suggestion.</span><span>{draft.length} chars</span></div>{findings.length>0&&<div className="highlight-preview"><div> <Sparkles size={13}/> FLAGGED CONTENT PREVIEW <small>Click a phrase to inspect it</small></div><p>{draft.split(/(guaranteed|7% returns|risk-free)/gi).map((part,i)=>{let f=findings.find(x=>x.term?.toLowerCase()===part.toLowerCase());return f?<mark key={i} className={`${f.severity} ${active===f.id?"chosen":""}`} onClick={()=>setActive(f.id)}>{part}</mark>:<React.Fragment key={i}>{part}</React.Fragment>})}</p></div>}<div className="editor-actions"><Btn onClick={()=>{setFindings([]);setResolved([]);setStatus("Not reviewed");setToast("Findings cleared")}}><X size={14}/> Clear findings</Btn><Btn kind="primary" disabled={busy} onClick={review}>{busy?<><span className="spinner"/> Checking content…</>:<><Sparkles size={15}/> Run brand review <ArrowRight size={15}/></>}</Btn></div><div className="method-note"><ShieldCheck size={14}/> Deterministic checks run first. AI interpretation is handled by the backend when enabled.</div></section>
