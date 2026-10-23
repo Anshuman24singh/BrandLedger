@@ -1,4 +1,4 @@
-import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut}from"lucide-react";import{api}from"./lib/api.js";
+import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw}from"lucide-react";import{api}from"./lib/api.js";
 
 const seed="Introducing PayNest Smart Savings. Earn 7% returns with our guaranteed, risk-free savings plan. Open your account today and start growing your money with confidence.";
 
@@ -55,7 +55,7 @@ function mapBackendFindings(items){
 
 export default function App(){
 
-const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=localStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>localStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>localStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>localStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false);
+const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=localStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>localStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>localStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>localStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState("");
 
 useEffect(()=>localStorage.setItem("bl-theme",theme),[theme]);
 useEffect(()=>localStorage.setItem("bl-page",page),[page]);
@@ -359,7 +359,41 @@ if (!authenticated) {
 
 return <div className={`app theme-${theme}`}>
 
-<aside className={`sidebar ${mobile?"mobile":""}`}><div className="logo"><span className="logo-mark"><ShieldCheck size={21}/></span><span className="logo-type">BrandLedger<small>BRAND GOVERNANCE</small></span><button className="close-mobile" onClick={()=>setMobile(false)}><X size={17}/></button></div><button className="workspace"><b>P</b><span><strong>PayNest</strong><small>Demo workspace</small></span><ChevronDown size={15}/></button><div className="nav-label">WORKSPACE</div>{nav.slice(0,2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}{id==="reviews"&&<small>04</small>}</button>)}<div className="nav-label spaced">GOVERNANCE</div>{nav.slice(2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div><div className="user"><b>{(currentUsername||"BL").slice(0,2).toUpperCase()}</b><span><strong>{currentUsername||"Signed-in user"}</strong><small>{isStaff?"Brand reviewer":"Content creator"}</small></span><MoreHorizontal size={18}/></div></div></aside>
+<aside className={`sidebar ${mobile?"mobile":""}`}><div className="logo" role="button" tabIndex={0} aria-label="Go to BrandLedger overview" onClick={()=>{setPage("overview");setMobile(false);setWorkspaceOpen(false)}} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setPage("overview");setMobile(false);setWorkspaceOpen(false)}}} style={{cursor:"pointer"}}>
+  <span className="logo-mark"><ShieldCheck size={21}/></span>
+  <span className="logo-type">BrandLedger<small>BRAND GOVERNANCE</small></span>
+  <button className="close-mobile" onClick={e=>{e.stopPropagation();setMobile(false)}}><X size={17}/></button>
+</div>
+<div style={{position:"relative",marginBottom:"4px"}}>
+  <button className="workspace" aria-expanded={workspaceOpen} onClick={()=>setWorkspaceOpen(v=>!v)} style={{width:"100%"}}>
+    <b style={{display:"grid",placeItems:"center",fontSize:"16px",fontWeight:800,background:"linear-gradient(145deg,#b6c8ff,#7f98e8)",color:"#111827",boxShadow:"0 3px 10px rgba(127,152,232,.25)"}}>P</b>
+    <span style={{minWidth:0,flex:1,textAlign:"left"}}><strong>PayNest</strong><small>Selected workspace</small></span>
+    <span style={{display:"flex",alignItems:"center",gap:"5px",fontSize:"10px",fontWeight:700,color:"#8ee0b1",whiteSpace:"nowrap"}}><i style={{width:"6px",height:"6px",borderRadius:"50%",background:"#5bd49a",display:"inline-block"}}/> ACTIVE</span>
+    <ChevronDown size={15} style={{transform:workspaceOpen?"rotate(180deg)":"rotate(0deg)",transition:"transform .18s"}}/>
+  </button>
+  {workspaceOpen&&<div role="dialog" aria-label="PayNest workspace panel" style={{position:"absolute",zIndex:40,top:"calc(100% + 8px)",left:0,right:0,minWidth:"245px",padding:"14px",borderRadius:"14px",border:"1px solid #343a49",background:"linear-gradient(155deg,#1a2030,#11151e)",boxShadow:"0 18px 42px rgba(0,0,0,.42)"}}>
+    <div style={{display:"flex",alignItems:"center",gap:"10px",paddingBottom:"12px",borderBottom:"1px solid #303748"}}>
+      <span style={{display:"grid",placeItems:"center",width:"42px",height:"42px",borderRadius:"12px",background:"linear-gradient(145deg,#b6c8ff,#7f98e8)",color:"#111827",fontWeight:900,fontSize:"20px"}}>P</span>
+      <span style={{flex:1,minWidth:0}}><strong style={{display:"block",fontSize:"14px"}}>PayNest</strong><small style={{display:"block",marginTop:"3px",color:"#9da8bd"}}>Brand governance workspace</small></span>
+      <span title="Selected workspace" style={{width:"8px",height:"8px",borderRadius:"50%",background:"#5bd49a",boxShadow:"0 0 0 4px rgba(91,212,154,.12)"}}/>
+    </div>
+    <div style={{display:"flex",gap:"8px",margin:"12px 0"}}>
+      <div style={{flex:1,padding:"9px",borderRadius:"9px",background:"rgba(255,255,255,.045)"}}><small style={{display:"block",fontSize:"10px",color:"#9da8bd"}}>WORKSPACE</small><b style={{display:"block",fontSize:"12px",marginTop:"4px"}}>Demo environment</b></div>
+      <div style={{flex:1,padding:"9px",borderRadius:"9px",background:"rgba(91,212,154,.07)"}}><small style={{display:"block",fontSize:"10px",color:"#9da8bd"}}>CONNECTION</small><b style={{display:"block",fontSize:"12px",marginTop:"4px",color:"#8ee0b1"}}>{apiMode==="API connected"?"API connected":apiMode}</b></div>
+    </div>
+    <small style={{display:"block",fontSize:"10px",fontWeight:800,letterSpacing:"1px",color:"#8d98ae",margin:"2px 0 6px"}}>WORKSPACE SHORTCUTS</small>
+    {[
+      ["Claims ledger",Layers3,"claims","Review approved product facts"],
+      ["Brand guidelines",BookOpen,"guidelines","View rules and voice"],
+      ["Guideline insights",Lightbulb,"insights","Explore recurring patterns"]
+    ].map(([label,Icon,target,desc])=><button key={target} role="menuitem" onClick={()=>{setPage(target);setWorkspaceOpen(false);setMobile(false)}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",textAlign:"left",padding:"9px 8px",border:0,borderRadius:"8px",background:"transparent",color:"inherit",cursor:"pointer"}}>
+      <span style={{display:"grid",placeItems:"center",width:"30px",height:"30px",borderRadius:"8px",background:"rgba(182,200,255,.09)",color:"#b6c8ff"}}><Icon size={15}/></span>
+      <span style={{flex:1,minWidth:0}}><b style={{display:"block",fontSize:"12px"}}>{label}</b><small style={{display:"block",fontSize:"10px",marginTop:"2px",color:"#9da8bd"}}>{desc}</small></span>
+      <ChevronDown size={13} style={{transform:"rotate(-90deg)",color:"#8792a9"}}/>
+    </button>)}
+    <button onClick={()=>{setWorkspaceOpen(false);setToast("PayNest is the only workspace configured in this local demo. Multi-workspace switching can be added when separate workspaces are supported.")}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px",width:"100%",marginTop:"8px",padding:"10px",border:"1px solid #3b4356",borderRadius:"9px",background:"rgba(255,255,255,.025)",color:"#dce3f3",fontSize:"12px",fontWeight:700,cursor:"pointer"}}><Settings2 size={14}/> Workspace details <ArrowUpRight size={13}/></button>
+  </div>}
+</div><div className="nav-label">WORKSPACE</div>{nav.slice(0,2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="nav-label spaced">GOVERNANCE</div>{nav.slice(2).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div><div className="user"><b>{(currentUsername||"BL").slice(0,2).toUpperCase()}</b><span><strong>{currentUsername||"Signed-in user"}</strong><small>{isStaff?"Brand reviewer":"Content creator"}</small></span><MoreHorizontal size={18}/></div></div></aside>
 
 {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close navigation"/>}
 
@@ -381,19 +415,29 @@ return <div className={`app theme-${theme}`}>
 
 {history&&<motion.div className="history-strip" initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}}><b><GitCompareArrows size={15}/> Saved versions <small>{versions.length} versions</small></b><div>{versions.map((v,i)=><button key={i} onClick={()=>{setDraft(v.text);setToast(v.name+" restored")}}><strong>{v.name}</strong><small>{v.time}</small></button>)}</div></motion.div>}
 
-<section className="panel" style={{padding:"14px 16px",marginBottom:"14px"}}>
-  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px",marginBottom:"10px"}}>
-    <div><b style={{fontSize:"14px"}}>Saved drafts</b><div style={{fontSize:"12px",opacity:.7,marginTop:"3px"}}>Open a draft saved in your backend database.</div></div>
-    <Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}>{loadingSavedDrafts?"Refreshing…":"Refresh list"}</Btn>
+<section className="panel" style={{padding:"13px 16px",marginBottom:"14px"}}>
+  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px"}}>
+    <div style={{display:"flex",alignItems:"center",gap:"10px",minWidth:0}}>
+      <span style={{width:"34px",height:"34px",borderRadius:"10px",display:"grid",placeItems:"center",background:"rgba(117,132,255,.12)",color:"#9da8ff",flexShrink:0}}><FolderOpen size={17}/></span>
+      <div style={{minWidth:0}}><b style={{fontSize:"14px"}}>Saved drafts <span style={{fontSize:"11px",fontWeight:600,opacity:.7,marginLeft:"5px"}}>{savedDrafts.length}</span></b><div style={{fontSize:"12px",opacity:.68,marginTop:"3px"}}>Your drafts, saved in the backend.</div></div>
+    </div>
+    <div style={{display:"flex",alignItems:"center",gap:"7px",flexShrink:0}}>
+      <button className="icon-btn" title="Refresh saved drafts" onClick={refreshSavedDrafts} disabled={loadingSavedDrafts} style={{width:"32px",height:"32px"}}>{loadingSavedDrafts?<span className="spinner"/>:<RefreshCw size={14}/>}</button>
+      {savedDrafts.length>3&&<Btn onClick={()=>setShowAllSavedDrafts(v=>!v)}>{showAllSavedDrafts?"Show recent":"View all drafts"} <ChevronDown size={14}/></Btn>}
+    </div>
   </div>
   {savedDrafts.length===0
-    ? <small style={{opacity:.7}}>{loadingSavedDrafts?"Loading saved drafts…":"No saved drafts returned yet. Run a review to save a draft here."}</small>
-    : <div style={{display:"flex",flexWrap:"wrap",gap:"8px"}}>
-        {savedDrafts.map(item=><button key={item.id} onClick={()=>openSavedDraft(item.id)} style={{textAlign:"left",padding:"8px 10px",borderRadius:"8px",border:"1px solid var(--border, #343a49)",background:"transparent",color:"inherit",cursor:"pointer",maxWidth:"100%"}}>
-          <b style={{display:"block",fontSize:"12px"}}>{item.title || `Draft ${item.id}`}</b>
-          <small style={{display:"block",opacity:.7,marginTop:"3px"}}>#{item.id} · {item.status || "saved"}</small>
+    ? <div style={{marginTop:"12px",padding:"12px",borderRadius:"10px",border:"1px dashed var(--border, #343a49)",fontSize:"12px",opacity:.75}}>{loadingSavedDrafts?"Loading saved drafts…":authenticated?"No saved drafts yet. Run a review to save your first draft.":"Sign in to load saved drafts."}</div>
+    : <>
+      {showAllSavedDrafts&&<input aria-label="Search saved drafts" value={savedDraftSearch} onChange={e=>setSavedDraftSearch(e.target.value)} placeholder="Search drafts by title or status…" style={{width:"100%",marginTop:"12px",padding:"9px 11px",borderRadius:"9px",border:"1px solid var(--border, #343a49)",background:"transparent",color:"inherit",fontSize:"12px",boxSizing:"border-box"}}/>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:"8px",marginTop:"12px"}}>
+        {savedDrafts.filter(item=>!showAllSavedDrafts||`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).slice(0,showAllSavedDrafts?savedDrafts.length:3).map(item=><button key={item.id} onClick={()=>openSavedDraft(item.id)} style={{display:"flex",alignItems:"center",gap:"10px",textAlign:"left",padding:"10px 11px",borderRadius:"10px",border:"1px solid var(--border, #343a49)",background:"rgba(255,255,255,.018)",color:"inherit",cursor:"pointer",minWidth:0,transition:"border-color .18s, background .18s"}}>
+          <span style={{width:"30px",height:"30px",borderRadius:"8px",display:"grid",placeItems:"center",background:"rgba(255,255,255,.045)",flexShrink:0}}><FileText size={15}/></span>
+          <span style={{display:"block",minWidth:0,flex:1}}><b style={{display:"block",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title || `Draft ${item.id}`}</b><small style={{display:"block",opacity:.68,marginTop:"4px",fontSize:"10px"}}>#{item.id} · {item.status || "saved"}</small></span><ChevronRight size={14} style={{opacity:.6,flexShrink:0}}/>
         </button>)}
-      </div>}
+      </div>
+      {showAllSavedDrafts&&savedDrafts.filter(item=>`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).length===0&&<small style={{display:"block",marginTop:"10px",opacity:.7}}>No drafts match that search.</small>}
+    </>}
 </section>
 <div className="docbar"><span className="file-icon"><FileText size={17}/></span><span className="docname"><b>{title}</b><small>{campaign} · Last edited just now</small></span><button className="icon-btn" title="Rename draft" onClick={()=>{let t=prompt("Rename draft",title);if(t?.trim())setTitle(t.trim())}}><Settings2 size={15}/></button><Pill tone={status==="Approved"?"good":status==="Not reviewed"?"": "warn"}>{status}</Pill></div>
 
