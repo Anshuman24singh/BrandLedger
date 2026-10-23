@@ -197,6 +197,7 @@ def decide(request, pk, finding_id):
     return Response(DraftSerializer(draft).data)
 
 
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def approve(request, pk):
@@ -208,9 +209,17 @@ def approve(request, pk):
 
     draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
 
-    if draft.findings.filter(state="open").exists():
+
+    unresolved_states = ["open", "acknowledged"]
+    if draft.findings.filter(state__in=unresolved_states).exists():
         return Response(
-            {"error": "Resolve all open findings before approval"},
+            {
+                "error": (
+                    "Resolve all open or acknowledged findings "
+                    "before approval. Revise the draft or dismiss "
+                    "the finding with a documented reason."
+                )
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -225,6 +234,7 @@ def approve(request, pk):
         )
 
     return Response(DraftSerializer(draft).data)
+
 
 
 @api_view(["GET"])
