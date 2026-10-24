@@ -1,3 +1,5 @@
+import json
+import os
 from unittest.mock import patch
 from django.test import TestCase
 from django.contrib.auth.models import User
@@ -335,3 +337,208 @@ class WorkflowTests(TestCase):
                 for decision in data["decisions"]
             )
         )
+class AIResponseValidationTests(TestCase):
+    def setUp(self):
+        self.fact = Fact.objects.create(
+            key="savings rate",
+            value="5%",
+            source="Approved product fact sheet",
+            status="approved",
+        )
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "test-key"})
+    @patch("core.engine.Groq")
+    def test_valid_empty_findings_list_is_accepted(
+        self, mock_groq
+    ):
+        from .engine import groq_inspect
+
+        mock_response = mock_groq.return_value.chat.completions.create
+        mock_response.return_value.choices = [
+            type(
+                "Choice",
+                (),
+                {
+                    "message": type(
+                        "Message",
+                        (),
+                        {"content": '{"findings": []}'},
+                    )(),
+                },
+            )(),
+        ]
+
+        result = groq_inspect("Our product may help customers.")
+
+        self.assertEqual(result, [])
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "test-key"})
+    @patch("core.engine.Groq")
+    def test_missing_findings_field_fails_safely(
+        self, mock_groq
+    ):
+        from .engine import AIReviewError, groq_inspect
+
+        mock_response = mock_groq.return_value.chat.completions.create
+        mock_response.return_value.choices = [
+            type(
+                "Choice",
+                (),
+                {
+                    "message": type(
+                        "Message",
+                        (),
+                        {"content": '{"message": "No findings field"}'},
+                    )(),
+                },
+            )(),
+        ]
+
+        with self.assertRaises(AIReviewError):
+            groq_inspect("Our product may help customers.")
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "test-key"})
+    @patch("core.engine.Groq")
+    def test_excerpt_not_in_draft_fails_safely(
+        self, mock_groq
+    ):
+        from .engine import AIReviewError, groq_inspect
+
+        response_data = {
+            "findings": [
+                {
+                    "kind": "unsupported_claim",
+                    "excerpt": "This text is not in the draft.",
+                    "reason": "The claim lacks evidence.",
+                    "suggestion": "Request approved evidence.",
+                    "source": "Human review required",
+                }
+            ]
+        }
+
+        mock_response = mock_groq.return_value.chat.completions.create
+        mock_response.return_value.choices = [
+            type(
+                "Choice",
+                (),
+                {
+                    "message": type(
+                        "Message",
+                        (),
+                        {"content": json.dumps(response_data)},
+                    )(),
+                },
+            )(),
+        ]
+
+        with self.assertRaises(AIReviewError):
+            groq_inspect("Our product may help customers.")
+
+class DuplicateSuppressionTests(TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+
+        self.ai_patch = patch(
+            "core.engine.groq_inspect",
+            return_value=[],
+        )
+        self.ai_patch.start()
+        self.addCleanup(self.ai_patch.stop)
+
+    def test_overlapping_brand_tone_finding_is_suppressed(self):
+        from unittest.mock import patch
+        from core.engine import inspect
+
+        deterministic_finding = {
+            "kind": "prohibited_term",
+            "excerpt": "guaranteed",
+            "reason": "Prohibited term",
+            "suggestion": "Use approved wording",
+            "source": "R-12: Brand style guide",
+        }
+
+        ai_finding = {
+            "kind": "brand_tone",
+            "excerpt": "Returns are guaranteed.",
+            "reason": "Tone issue",
+            "suggestion": "Revise the wording",
+            "source": "Human review required",
+        }
+
+        with (
+            patch(
+                "core.engine.deterministic_inspect",
+                return_value=[deterministic_finding],
+            ),
+            patch(
+                "core.engine.groq_inspect",
+                return_value=[ai_finding],
+            ),
+        ):
+            findings = inspect("Returns are guaranteed.")
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "prohibited_term")
+
+    def test_overlapping_unsupported_claim_is_suppressed(self):
+        from unittest.mock import patch
+        from core.engine import inspect
+
+        deterministic_finding = {
+            "kind": "fact_mismatch",
+            "excerpt": "savings rate is 7%",
+            "reason": "Approved rate is 6.5%",
+            "suggestion": "Use the approved rate",
+            "source": "savings rate: F-014",
+        }
+
+        ai_finding = {
+            "kind": "unsupported_claim",
+            "excerpt": "Savings rate is 7%.",
+            "reason": "Claim conflicts with approved facts",
+            "suggestion": "Verify the rate",
+            "source": "Human review required",
+        }
+
+        with (
+            patch(
+                "core.engine.deterministic_inspect",
+                return_value=[deterministic_finding],
+            ),
+            patch(
+                "core.engine.groq_inspect",
+                return_value=[ai_finding],
+            ),
+        ):
+            findings = inspect("Our savings rate is 7%.")
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "fact_mismatch")
+
+    def test_non_duplicate_ai_finding_is_retained(self):
+        from unittest.mock import patch
+        from core.engine import inspect
+
+        ai_finding = {
+            "kind": "brand_tone",
+            "excerpt": "We are the best in the country.",
+            "reason": "Comparative messaging needs review",
+            "suggestion": "Use substantiated wording",
+            "source": "Human review required",
+        }
+
+        with (
+            patch(
+                "core.engine.deterministic_inspect",
+                return_value=[],
+            ),
+            patch(
+                "core.engine.groq_inspect",
+                return_value=[ai_finding],
+            ),
+        ):
+            findings = inspect("We are the best in the country.")
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "brand_tone")
+

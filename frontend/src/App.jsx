@@ -263,47 +263,87 @@ async function review(){
 }
 
 async function apply(f){
-  let t = draft;
-  const target = f.excerpt || f.term;
-  if (target && t.includes(target)) {
-    t = t.replace(target, f.suggestion);
-  } else if (f.id === "PF-104") {
-    t = t.replace(/7\s*%\s*returns?/i, "6.5% p.a.");
-  } else if (f.id === "BR-01") {
-    t = t.replace(/guaranteed,?\s*/i, "");
-  } else if (f.id === "BR-02") {
-    t = t.replace(/risk-free,?\s*/i, "");
+  // APIs may name the replacement field differently across older responses.
+  const rawSuggestion = f.suggestion ?? f.replacement ?? f.suggested_replacement ?? f.replacement_text;
+  const suggestion = typeof rawSuggestion === "string" ? rawSuggestion.trim() : "";
+  const target = typeof f.excerpt === "string" && f.excerpt.trim()
+    ? f.excerpt.trim()
+    : (typeof f.term === "string" ? f.term.trim() : "");
+
+  if (!suggestion || /^human review required$/i.test(suggestion)) {
+    setToast("This finding has no approved replacement text. No text was changed.");
+    return;
   }
 
-  setDraft(t);
-  setVersions(v => [
-    ...v,
-    {
-      name: `Version ${v.length + 1}`,
-      text: t,
-      time: new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})
-    }
-  ]);
+  const instructionLike = /^(please\s+)?(remove|delete|replace|rewrite|change|avoid|describe|explain|ask|use|consider|ensure|make sure|try|review|substantiate)\b/i.test(suggestion)
+    || /^(this|the) (phrase|claim|text|sentence|wording)\b/i.test(suggestion)
+    || /\bapproved wording\b/i.test(suggestion);
+  if (instructionLike) {
+    setToast("This finding contains reviewer instructions, not replacement copy. No text was changed.");
+    return;
+  }
 
-  if (backendDraftId && authenticated) {
-    try {
+  // Prefer exact matching. If the backend excerpt differs only in spacing or
+  // capitalization, find that same excerpt without touching surrounding text.
+  let start = target ? draft.indexOf(target) : -1;
+  let end = start >= 0 ? start + target.length : -1;
+  if (start < 0 && target) {
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    const match = new RegExp(escaped, "i").exec(draft);
+    if (match) { start = match.index; end = start + match[0].length; }
+  }
+  if (start < 0 || end < start) {
+    setToast("The flagged excerpt could not be matched to the current draft. Run the review again; no text was changed.");
+    return;
+  }
+
+  const t = draft.slice(0, start) + suggestion + draft.slice(end);
+  if (t === draft) {
+    setToast("The suggested replacement is identical to the existing text. No change was made.");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    // Save first. Only update the editor after the backend accepts the revision.
+    if (backendDraftId && authenticated) {
       const result = await api.revise(backendDraftId, t);
       const list = mapBackendFindings(result?.findings);
+      setDraft(t);
+      setVersions(v => [
+        ...v,
+        {
+          name: `Version ${v.length + 1}`,
+          text: t,
+          time: new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})
+        }
+      ]);
       setFindings(list);
       setActive(list[0]?.id || null);
       setResolved(list.filter(x => x.state === "dismissed").map(x => x.id));
       setStatus(list.some(x => x.state === "open" || x.state === "acknowledged") ? "Changes requested" : "Ready for review");
       await refreshSavedDrafts();
-      setToast("Suggestion applied and revision saved to the backend.");
-      return;
-    } catch (error) {
-      setToast(`Suggestion applied locally, but backend save failed: ${error.message}`);
+      setToast("Suggestion applied. Revision saved and content reviewed again.");
       return;
     }
-  }
 
-  setResolved(a => [...new Set([...a, f.id])]);
-  setToast("Suggestion applied to the draft.");
+    // Local/demo mode: apply only the exact excerpt and retain local history.
+    setDraft(t);
+    setVersions(v => [
+      ...v,
+      {
+        name: `Version ${v.length + 1}`,
+        text: t,
+        time: new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})
+      }
+    ]);
+    setResolved(a => [...new Set([...a, f.id])]);
+    setToast("Suggestion applied to the local draft. Run a review to verify the result.");
+  } catch (error) {
+    setToast(`Suggestion was not applied because saving failed: ${error.message}`);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function markReviewed(f){
@@ -396,13 +436,36 @@ useEffect(()=>{
 
 if (!authenticated) {
   return <div className={`app theme-${theme}`} style={{minHeight:"100vh",display:"grid",placeItems:"center",padding:"24px",background:"#0b0e14",color:"#f4f5f7"}}>
-    <form onSubmit={login} style={{width:"min(420px,100%)",boxSizing:"border-box",padding:"32px",borderRadius:"18px",background:"#151923",border:"1px solid #2b3140",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
+    <form onSubmit={login} style={{width:"min(460px,100%)",boxSizing:"border-box",padding:"32px",borderRadius:"18px",background:"#151923",border:"1px solid #2b3140",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
       <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"24px"}}>
         <span style={{display:"grid",placeItems:"center",width:"44px",height:"44px",borderRadius:"12px",background:"#242b3b",color:"#b6c8ff"}}><ShieldCheck size={24}/></span>
         <span><strong style={{display:"block",fontSize:"22px"}}>BrandLedger</strong><small style={{color:"#9ba4b8",letterSpacing:"1.4px"}}>BRAND GOVERNANCE</small></span>
       </div>
       <h1 style={{fontSize:"26px",margin:"0 0 8px"}}>Sign in to your workspace</h1>
-      <p style={{color:"#a7afc0",lineHeight:1.5,margin:"0 0 24px"}}>Use your Django account to review and save campaign drafts.</p>
+      <p style={{color:"#a7afc0",lineHeight:1.5,margin:"0 0 18px"}}>Use your Django account to review and save campaign drafts.</p>
+      <section aria-label="Judge demo accounts" style={{padding:"14px",marginBottom:"22px",borderRadius:"12px",border:"1px solid #394258",background:"#10141d"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px",marginBottom:"12px"}}>
+          <strong style={{fontSize:"13px",color:"#f4f5f7"}}>Judge demo accounts</strong>
+          <span style={{fontSize:"10px",letterSpacing:".8px",color:"#9ba4b8"}}>DEMO ACCESS</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:"10px"}}>
+          <div style={{padding:"11px",borderRadius:"9px",border:"1px solid #2d3546",background:"#171c27"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",marginBottom:"7px"}}>
+              <strong style={{fontSize:"12px",color:"#b6c8ff"}}>Content Creator</strong>
+              <button type="button" onClick={()=>{setLoginUsername("creator");setLoginPassword("Creator@12345");setLoginError("")}} style={{border:"1px solid #46516a",borderRadius:"7px",padding:"5px 9px",background:"#242b3b",color:"#f4f5f7",fontSize:"11px",fontWeight:700,cursor:"pointer"}}>Use creator login</button>
+            </div>
+            <div style={{fontSize:"12px",lineHeight:1.8,color:"#c3c9d6"}}>Username: <code style={{color:"#fff"}}>creator</code><br/>Password: <code style={{color:"#fff",overflowWrap:"anywhere"}}>Creator@12345</code></div>
+          </div>
+          <div style={{padding:"11px",borderRadius:"9px",border:"1px solid #2d3546",background:"#171c27"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",marginBottom:"7px"}}>
+              <strong style={{fontSize:"12px",color:"#b6c8ff"}}>Brand Reviewer</strong>
+              <button type="button" onClick={()=>{setLoginUsername("reviewer");setLoginPassword("Reviewer@12345");setLoginError("")}} style={{border:"1px solid #46516a",borderRadius:"7px",padding:"5px 9px",background:"#242b3b",color:"#f4f5f7",fontSize:"11px",fontWeight:700,cursor:"pointer"}}>Use reviewer login</button>
+            </div>
+            <div style={{fontSize:"12px",lineHeight:1.8,color:"#c3c9d6"}}>Username: <code style={{color:"#fff"}}>reviewer</code><br/>Password: <code style={{color:"#fff",overflowWrap:"anywhere"}}>Reviewer@12345</code></div>
+          </div>
+        </div>
+        <p style={{fontSize:"10px",lineHeight:1.5,color:"#8992a5",margin:"10px 0 0"}}>Shared demonstration credentials for judges. Select a role to fill the sign-in form.</p>
+      </section>
       <label style={{display:"block",fontSize:"12px",fontWeight:700,letterSpacing:"1px",marginBottom:"8px"}}>USERNAME</label>
       <input value={loginUsername} onChange={e=>setLoginUsername(e.target.value)} autoComplete="username" required style={{boxSizing:"border-box",width:"100%",padding:"12px 14px",marginBottom:"18px",borderRadius:"9px",border:"1px solid #3a4152",background:"#0e121b",color:"#fff",fontSize:"15px"}}/>
       <label style={{display:"block",fontSize:"12px",fontWeight:700,letterSpacing:"1px",marginBottom:"8px"}}>PASSWORD</label>
@@ -515,7 +578,7 @@ return <div className={`app theme-${theme}`}>
 {showEvidence&&<aside className="panel evidence"><div className="panel-head"><div><h3>Review findings <span className="count">{open.length}</span></h3><p>{findings.length?`${resolved.length} of ${findings.length} addressed`:"Run a review to see evidence-backed findings."}</p></div><button title="Cycle finding filter" onClick={()=>setFindings(f=>[...f].reverse())}><Filter size={15}/></button></div>{findings.length>0&&<div className="progress"><span>Resolution progress <b>{completion}%</b></span><div><i style={{width:completion+"%"}}/></div></div>}{!findings.length?<div className="empty"><span><ShieldCheck size={29}/><Sparkles size={13}/></span><b>Your evidence panel is ready</b><p>Run a review to see each issue, the source rule, and a suggested next step.</p><small>✓ Approved facts　 ✓ Prohibited phrases　 ✓ Claim evidence</small></div>:<div className="finding-list">{findings.map((f,i)=><motion.button key={f.id} className={`finding ${active===f.id?"selected":""} ${resolved.includes(f.id)?"resolved":""}`} onClick={()=>setActive(f.id)} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:i*.06}}><span className={`finding-icon ${f.severity}`}>{f.severity==="critical"?<ShieldAlert size={16}/>:<Flag size={16}/>}</span><span className="finding-body"><small>{f.type}<b className={f.severity}>{resolved.includes(f.id)?"RESOLVED":f.severity.toUpperCase()}</b></small><strong>{f.title}</strong><em>{f.detail}</em><label><BookOpen size={12}/>{f.source}</label></span><ChevronRight size={14}/></motion.button>)}</div>}
 
 
-{activeFinding&&<AnimatePresence mode="wait"><motion.div key={activeFinding.id} className="evidence-detail" initial={{opacity:0,y:7}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="detail-kicker"><BookOpen size={13}/> EVIDENCE & EXPLANATION <b className={activeFinding.severity}>{activeFinding.severity.toUpperCase()}</b></div><h4>{activeFinding.title}</h4><p>{activeFinding.detail}</p><div className="source-card"><BadgeCheck size={16}/><span><small>TRACEABLE SOURCE</small><b>{activeFinding.source}</b><em>{activeFinding.id==="PF-104"?"PayNest Smart Savings rate: 6.5% p.a. · Approved fact PF-104":"Rule verified in the fictional PayNest demo rulebook."}</em></span></div><div className="suggestion"><small><Sparkles size={13}/> SUGGESTED NEXT STEP</small><p>{activeFinding.suggestion}</p><div><Btn kind="primary" disabled={resolved.includes(activeFinding.id)} onClick={()=>apply(activeFinding)}><Check size={14}/> Apply suggestion</Btn>{isStaff&&<button className="text-btn" disabled={resolved.includes(activeFinding.id)} onClick={()=>markReviewed(activeFinding)}>Mark reviewed</button>}</div></div></motion.div></AnimatePresence>}<div className="evidence-foot"><LockKeyhole size={12}/> Suggestions never publish automatically</div></aside>}</div>
+{activeFinding&&<AnimatePresence mode="wait"><motion.div key={activeFinding.id} className="evidence-detail" initial={{opacity:0,y:7}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="detail-kicker"><BookOpen size={13}/> EVIDENCE & EXPLANATION <b className={activeFinding.severity}>{activeFinding.severity.toUpperCase()}</b></div><h4>{activeFinding.title}</h4><p>{activeFinding.detail}</p><div className="source-card"><BadgeCheck size={16}/><span><small>TRACEABLE SOURCE</small><b>{activeFinding.source}</b><em>{activeFinding.id==="PF-104"?"PayNest Smart Savings rate: 6.5% p.a. · Approved fact PF-104":"Rule verified in the fictional PayNest demo rulebook."}</em></span></div><div className="suggestion"><small><Sparkles size={13}/> SUGGESTED NEXT STEP</small><p>{activeFinding.suggestion}</p><div><Btn kind="primary" disabled={busy || resolved.includes(activeFinding.id)} onClick={()=>apply(activeFinding)}><Check size={14}/> Apply suggestion</Btn>{isStaff&&<button className="text-btn" disabled={resolved.includes(activeFinding.id)} onClick={()=>markReviewed(activeFinding)}>Mark reviewed</button>}</div></div></motion.div></AnimatePresence>}<div className="evidence-foot"><LockKeyhole size={12}/> Suggestions never publish automatically</div></aside>}</div>
 
 {isStaff&&<section className="panel decision"><div className="decision-copy"><span><ShieldCheck size={19}/></span><div><b>Human decision required</b><small>Resolve findings, then record a decision. This never publishes content.</small></div></div><div className="decision-actions"><input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Optional reviewer note…"/><Btn kind="reject" onClick={()=>decide("rejected")}><ThumbsDown size={14}/> Reject</Btn><Btn onClick={()=>decide("changes-requested")}><ArrowRight size={14}/> Request changes</Btn><Btn kind="approve" onClick={()=>decide("approved")}><ThumbsUp size={14}/> Approve draft</Btn></div>{decision&&<p className="decision-note"><CheckCheck size={14}/> {decision==="approved"?"Approval saved to the backend:":"Decision recorded in this browser session:"} <b>{decision}</b>.</p>}</section>}</motion.section>}
 

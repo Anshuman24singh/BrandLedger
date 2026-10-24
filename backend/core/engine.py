@@ -9,6 +9,22 @@ class AIReviewError(Exception):
     """Raised when AI review cannot be completed reliably."""
 
 
+def _is_instructional_suggestion(value):
+    """Return True when text describes an action instead of replacement copy."""
+    if not isinstance(value, str) or not value.strip():
+        return True
+    text = re.sub(r"\s+", " ", value).strip().casefold()
+    if text == "human review required":
+        return True
+    patterns = (
+        r"^(please\s+)?(remove|delete|replace|rewrite|change|avoid|describe|explain|ask|use|consider|ensure|make sure|try|review|substantiate|verify|confirm|check)\b",
+        r"^(this|the) (phrase|claim|text|sentence|wording)\b",
+        r"\b(review|revise) this (claim|phrase|text|sentence)\b",
+        r"\bapproved wording\b",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
 def deterministic_inspect(content):
     """Run existing rule and approved-fact checks without using AI."""
     findings = []
@@ -21,7 +37,8 @@ def deterministic_inspect(content):
                 "reason": rule.explanation,
                 "suggestion": (
                     rule.replacement
-                    or "Ask reviewer for approved wording"
+                    if not _is_instructional_suggestion(rule.replacement)
+                    else "Human review required"
                 ),
                 "source": f"{rule.code}: {rule.source}",
             })
@@ -93,10 +110,24 @@ Constraints:
   by the supplied approved facts.
 - Use "brand_tone" for clear tone or messaging issues.
 - Return an empty findings list if no meaningful issue is found.
-- Each excerpt must be copied exactly from the draft.
-- Suggestions are proposals, not automatic edits.
+- Each excerpt must be copied exactly from the draft. It identifies the ONLY
+  part of the draft that the Apply Suggestion button will replace.
+- The "suggestion" field MUST contain replacement copy that can be inserted
+  directly in place of the excerpt. Do NOT return instructions, explanations,
+  advice, labels, or phrases such as "remove this phrase" or "describe this".
+- Keep the replacement focused on the excerpt and preserve the surrounding
+  sentence's grammar and meaning wherever possible.
+- Prefer a concrete, minimal replacement whenever the supplied approved facts
+  or a rule replacement supports one. For example, if the exact claim says 7%
+  and an approved fact for that same product/metric says 5%, replace only the
+  unsupported numeric claim with the approved 5% wording. Do not assume facts
+  refer to the same product or metric unless the supplied context confirms it.
+- Never invent a fact, number, guarantee, product feature, or approved claim.
+- If no safe replacement can be written from the supplied facts and rules,
+  set suggestion to the exact text "Human review required". Do not suggest
+  that this placeholder be inserted into the draft.
 - Cite a supplied fact or rule only if it genuinely supports the finding.
-- Otherwise use "Human review required".
+- Otherwise use "Human review required" as the source.
 - Return valid JSON only in this format:
 {{
   "findings": [
@@ -104,7 +135,7 @@ Constraints:
       "kind": "unsupported_claim",
       "excerpt": "exact text from draft",
       "reason": "concise explanation",
-      "suggestion": "proposed correction or review action",
+      "suggestion": "exact replacement text for the flagged excerpt",
       "source": "actual supplied source or Human review required"
     }}
   ]
@@ -144,18 +175,24 @@ DRAFT:
                 },
           ],
           temperature=0.1,
-          max_completion_tokens=1200,
+          max_completion_tokens=2000,
+          response_format={"type": "json_object"},
       )
 
-        response_text = response.choices[0].message.content or "{}"
+        response_text = (response.choices[0].message.content or "").strip()
+        # Be tolerant of Markdown fences while still requiring valid JSON.
+        if response_text.startswith("```"):
+            response_text = re.sub(r"^```(?:json)?\s*", "", response_text, flags=re.I)
+            response_text = re.sub(r"\s*```$", "", response_text)
         data = json.loads(response_text)
-        if not isinstance(data, dict) or "findings" not in data:
-            raise ValueError("AI response must contain a findings field.")
+        if not isinstance(data, dict):
+            raise ValueError("AI response must be a JSON object.")
+        if "findings" not in data:
+            raise ValueError("AI response is missing the findings field.")
 
         raw_findings = data["findings"]
-
         if not isinstance(raw_findings, list):
-            raise ValueError("AI findings must be a list.")
+            raise ValueError("AI response findings must be a list.")
 
         valid_sources = {
             f"{fact['key']}: {fact['source']}"
@@ -170,7 +207,7 @@ DRAFT:
 
         for item in raw_findings:
             if not isinstance(item, dict):
-                raise ValueError("Each AI finding must be an object.")
+                raise ValueError("Each AI finding must be a JSON object.")
 
             kind = item.get("kind")
             excerpt = item.get("excerpt")
@@ -179,23 +216,25 @@ DRAFT:
             source = item.get("source")
 
             if kind not in allowed_kinds:
-                raise ValueError("AI finding contains an invalid kind.")
+                continue
 
             if not all(
                 isinstance(value, str) and value.strip()
                 for value in (excerpt, reason, suggestion, source)
             ):
                 raise ValueError(
-                    "AI finding contains a missing or invalid field."
+                    "AI finding is missing a required non-empty string field."
                 )
 
             if excerpt not in content:
                 raise ValueError(
-                    "AI finding excerpt does not match the draft."
+                    "AI finding excerpt does not exactly match the draft."
                 )
 
             if source != "Human review required" and source not in valid_sources:
                 source = "Human review required"
+            if _is_instructional_suggestion(suggestion):
+                suggestion = "Human review required"
 
             findings.append({
                 "kind": kind,
@@ -243,25 +282,21 @@ def inspect(content):
         for existing_finding in findings:
             # Suppress AI findings that describe the same issue
             # already identified by deterministic checks.
-            if (
+            same_prohibited_issue = (
                 existing_finding["kind"] == "prohibited_term"
                 and ai_finding["kind"] == "brand_tone"
-                and overlaps(
-                    existing_finding["excerpt"],
-                    ai_finding["excerpt"],
-                )
-            ):
-                duplicate = True
-                break
-
-            if (
+                and overlaps(existing_finding["excerpt"], ai_finding["excerpt"])
+            )
+            same_fact_issue = (
                 existing_finding["kind"] == "fact_mismatch"
                 and ai_finding["kind"] == "unsupported_claim"
-                and overlaps(
-                    existing_finding["excerpt"],
-                    ai_finding["excerpt"],
-                )
-            ):
+                and overlaps(existing_finding["excerpt"], ai_finding["excerpt"])
+            )
+            if same_prohibited_issue or same_fact_issue:
+                # Preserve the deterministic finding, but borrow the AI's
+                # usable replacement if the stored rule only has instructions.
+                if _is_instructional_suggestion(existing_finding.get("suggestion")) and not _is_instructional_suggestion(ai_finding.get("suggestion")):
+                    existing_finding["suggestion"] = ai_finding["suggestion"]
                 duplicate = True
                 break
 
