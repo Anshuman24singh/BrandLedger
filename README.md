@@ -1,65 +1,190 @@
-# BrandLedger — Round 2 functional MVP
+# BrandLedger
 
-A **real Django/DRF + PostgreSQL + React** starter for the fictional PayNest demo. It is a scoped deterministic-first implementation, **not** a completed enterprise brand-governance product.
+**AI-assisted brand compliance review for marketing content.**
 
-## Quick start
+BrandLedger helps teams review marketing drafts against brand knowledge before publication. It provides a workflow for content creators to draft and revise content, identify potentially risky claims and wording, and submit content to reviewers for approval.
 
-Prerequisites: Python 3.11+, Node.js 20+, Docker Desktop with running Docker engine (or a locally installed PostgreSQL server).
+## 🚀 Live Demo
 
-**Terminal 1 (database):**
+- **Frontend:** https://brand-ledger-virid.vercel.app/
+- **Backend API Health:** https://brandledger-api.onrender.com/api/health/
+- **GitHub Repository:** https://github.com/Anshuman24singh/BrandLedger
 
-```bash
-docker compose up -d db
+## ✨ Features
+
+- **Role-based access:** Separate experiences for content creators and reviewers.
+- **Draft management:** Create, view, revise, and delete content drafts.
+- **Brand compliance checks:** Identify potentially risky phrases and mismatches with known brand facts.
+- **Review findings:** Allow reviewers to acknowledge or dismiss findings.
+- **Approval workflow:** Enforce backend rules before a draft can be approved.
+- **Revision history:** Track changes made to drafts.
+- **AI integration:** Groq LLM integration in the Django backend for AI-assisted content review.
+
+*The AI feature should be considered live only after successful verification on the deployed application.*
+
+## 🛠️ Technology Stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React, Vite, JavaScript |
+| Backend | Python, Django |
+| API | Django REST Framework |
+| LLM integration | Groq API |
+| Application server | Gunicorn |
+| Static file serving | WhiteNoise |
+| Frontend deployment | Vercel |
+| Backend deployment | Render |
+
+## 🏗️ Architecture
+
+```text
+User
+ |
+ v
+React + Vite Frontend
+       (Vercel)
+          |
+          | HTTPS / REST API
+          v
+Django REST Framework
+        (Render)
+          |
+          +-- Authentication and permissions
+          +-- Draft management and revisions
+          +-- Brand knowledge and review findings
+          +-- Reviewer decisions and approval rules
+          +-- Rule-based review engine
+          +-- Groq LLM integration
 ```
 
-**Terminal 2 (backend):**
+The frontend communicates with the Django backend through REST API endpoints. The backend manages draft data, role permissions, review findings, and approval decisions. LLM requests are handled server-side so the Groq API key is not exposed to the browser.
+
+## 🔌 API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/login/` | Authenticate a user |
+| `POST` | `/api/logout/` | Log out |
+| `GET` | `/api/health/` | Check backend health |
+| `GET` | `/api/knowledge/` | Retrieve brand knowledge |
+| `GET` | `/api/drafts/` | List accessible drafts |
+| `POST` | `/api/drafts/` | Create a draft |
+| `GET` | `/api/drafts/{id}/` | Retrieve a draft |
+| `DELETE` | `/api/drafts/{id}/` | Delete a draft |
+| `POST` | `/api/drafts/{id}/revise/` | Revise a draft |
+| `POST` | `/api/drafts/{id}/findings/{finding_id}/decide/` | Record a reviewer decision |
+| `POST` | `/api/drafts/{id}/approve/` | Approve a draft when requirements are satisfied |
+
+## 💻 Run Locally
+
+### Prerequisites
+
+- Python
+- Node.js and npm
+- Git
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/Anshuman24singh/BrandLedger.git
+cd BrandLedger
+```
+
+### 2. Start the backend
 
 ```bash
 cd backend
 python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-python manage.py makemigrations core
+```
+
+Activate the environment.
+
+**Windows PowerShell:**
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+**macOS / Linux:**
+
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies and run the server:
+
+```bash
+python -m pip install -r requirements.txt
 python manage.py migrate
-python manage.py seed_demo
-python manage.py test core
 python manage.py runserver
 ```
 
-**Terminal 3 (frontend):**
+The backend will normally be available at `http://127.0.0.1:8000/`.
+
+### 3. Start the frontend
+
+Open another terminal:
 
 ```bash
 cd frontend
 npm install
+```
+
+Create a frontend `.env` file containing:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000/api
+```
+
+Start the development server:
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:5173. Log in as `creator / creator123!`, create a draft using `Our savings rate is 7%. Returns guaranteed.`, acknowledge or dismiss findings, edit to `Our savings rate is 6.5%. Returns subject to applicable terms.`, save new version. Sign out and log in as `reviewer / reviewer123!` to approve. See the audit history tab.
+Open the local URL displayed by Vite.
 
-**Important:** These are intentionally insecure demo credentials. Change them before hosting. Do not use actual client data. For public hosting, restrict access and configure secrets, HTTPS, CORS, allowed hosts, persistent PostgreSQL and a safe authentication policy.
+## 🔐 Environment Variables
 
-## Working features
-- Token-based demo login, creator and staff reviewer
-- Approved facts (including superseded facts) and prohibited phrase rules
-- Draft submission and deterministic finding generation
-- Findings with excerpts, evidence source and suggested wording
-- Acknowledge/dismiss findings, revise to a new version, reviewer-only approval
-- Audit history for versions and decisions
-- Django tests for the central review workflow
+### Render — Backend
 
-## Honest limits and must-fix before production
-- The fact checker recognises **explicit key + numeric value** patterns such as `savings rate is 7%`; it is **not** a general semantic claim verifier.
-- Rule/fact management currently uses Django admin, not a creator-facing UI.
-- No LLM, image/document parsing, accessibility checks or governance dashboard are included.
-- Single demo workspace only; all authenticated users can see drafts. This is not multi-tenant isolation.
-- Reviewer is currently a staff flag. This is a demo role model, not granular enterprise permissions.
-- Demo accounts and passwords must not be exposed publicly as-is; add rate limits and secure authentication before external deployment.
-- To deploy to Render, use build command `pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput` and start command `gunicorn config.wsgi:application` from backend root; provision PostgreSQL and environment variables. Configure frontend `VITE_API_URL` to the deployed backend `/api` and set backend `FRONTEND_ORIGINS` to the Vercel origin.
+Configure backend environment variables in the Render service settings.
 
-## Round 3 improvements (proposed)
-1. Source-grounded semantic AI checks for unsupported claims and tone, with structured output and human review of uncertainty.
-2. Secure organisation workspaces with granular creator/reviewer/manager permissions, private source uploads and stronger audit controls.
-3. Multi-format checks (DOCX/image assets) plus accessible visual/terminology checks and recurring guideline-gap analytics.
+```env
+GROQ_API_KEY=your_groq_api_key
+```
 
-These are **planned** improvements, not implemented Round 2 features.
+Use this variable name if the Django code reads `GROQ_API_KEY`. Store the real key in Render's environment settings, never in source code or GitHub.
+
+The configured Render start command is:
+
+```bash
+python manage.py migrate --noinput && gunicorn config.wsgi:application
+```
+
+### Vercel — Frontend
+
+Set the deployed backend URL in the Vercel project environment settings:
+
+```env
+VITE_API_BASE_URL=https://brandledger-api.onrender.com/api
+```
+
+Redeploy the frontend after changing environment variables.
+
+## 🔒 Security and Permissions
+
+- Keep API keys and secrets in environment variables.
+- Do not commit `.env` files or credentials.
+- Enforce role permissions and approval rules on the backend.
+- Verify that restricted actions are unavailable to unauthorized users.
+
+## 🔮 Future Improvements
+
+- Context-aware AI claim analysis with explanations and safer rewrite suggestions.
+- Evidence-grounded retrieval of approved brand facts and policy references.
+- Governance analytics for review outcomes, recurring risks, and approval history.
+
+## 📄 License
+
+No license has been specified yet.
