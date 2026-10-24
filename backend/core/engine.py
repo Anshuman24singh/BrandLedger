@@ -59,12 +59,15 @@ def deterministic_inspect(content):
             if observed != expected:
                 findings.append({
                     "kind": "fact_mismatch",
-                    "excerpt": match.group(),
+                    # Replace only the mismatched value, not the whole key/value
+                    # phrase. This keeps the suggestion grammatical and makes the
+                    # frontend's exact-excerpt replacement deterministic.
+                    "excerpt": match.group(1),
                     "reason": (
                         f"Current approved {key} is {fact.value}; "
                         f"draft states {match.group(1)}."
                     ),
-                    "suggestion": f"{key} is {fact.value}",
+                    "suggestion": fact.value,
                     "source": f"{fact.key}: {fact.source}",
                 })
 
@@ -117,11 +120,6 @@ Constraints:
   advice, labels, or phrases such as "remove this phrase" or "describe this".
 - Keep the replacement focused on the excerpt and preserve the surrounding
   sentence's grammar and meaning wherever possible.
-- Prefer a concrete, minimal replacement whenever the supplied approved facts
-  or a rule replacement supports one. For example, if the exact claim says 7%
-  and an approved fact for that same product/metric says 5%, replace only the
-  unsupported numeric claim with the approved 5% wording. Do not assume facts
-  refer to the same product or metric unless the supplied context confirms it.
 - Never invent a fact, number, guarantee, product feature, or approved claim.
 - If no safe replacement can be written from the supplied facts and rules,
   set suggestion to the exact text "Human review required". Do not suggest
