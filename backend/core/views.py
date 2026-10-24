@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from .models import Fact, Rule, Draft, Version, Finding, Decision
 from .serializers import FactSerializer, RuleSerializer, DraftSerializer
-from .engine import inspect
+from .engine import AIReviewError, inspect
 
 
 def accessible_drafts(user):
@@ -61,10 +61,23 @@ def drafts(request):
     if not title or not content or len(content) > 20000:
         return Response({"error": "Title and content (max 20,000 characters) required"}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        findings = inspect(content)
+    except AIReviewError:
+        return Response(
+            {
+                "error": (
+                    "AI review is temporarily unavailable. "
+                    "Your draft was not saved. Please try again."
+                )
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     with transaction.atomic():
         draft = Draft.objects.create(title=title, content=content, author=request.user)
         version = Version.objects.create(draft=draft, content=content, version=1, editor=request.user)
-        for finding in inspect(content):
+        for finding in findings:
             Finding.objects.create(draft=draft, version=version, **finding)
 
     return Response(DraftSerializer(draft).data, status=status.HTTP_201_CREATED)
@@ -98,6 +111,19 @@ def revise(request, pk):
     if not content or len(content) > 20000:
         return Response({"error": "Content required (max 20,000 characters)"}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        findings = inspect(content)
+    except AIReviewError:
+        return Response(
+            {
+                "error": (
+                    "AI review is temporarily unavailable. "
+                    "Your draft was not revised. Please try again."
+                )
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     with transaction.atomic():
         version_number = draft.versions.count() + 1
         version = Version.objects.create(draft=draft, content=content, version=version_number, editor=request.user)
@@ -105,7 +131,7 @@ def revise(request, pk):
         draft.status = "in_review"
         draft.save(update_fields=["content", "status", "updated_at"])
         draft.findings.filter(state="open").update(state="obsolete")
-        for finding in inspect(content):
+        for finding in findings:
             Finding.objects.create(draft=draft, version=version, **finding)
         Decision.objects.create(draft=draft, actor=request.user, action="revised", comment=f"Created version {version_number}")
     return Response(DraftSerializer(draft).data)
