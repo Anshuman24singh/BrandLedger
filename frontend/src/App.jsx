@@ -1,14 +1,19 @@
 import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
 
-const seed="Introducing PayNest Smart Savings. Earn 7% returns with our guaranteed, risk-free savings plan. Open your account today and start growing your money with confidence.";
+const seed="Introducing PayNest Smart Savings. Our savings rate is 7%. Returns are guaranteed and risk-free. Please review the current approved rate and product terms before publication.";
 
-const rules=[{id:"BR-01",type:"Prohibited language",title:"“guaranteed” is not approved",detail:"The rulebook prohibits guarantees about financial outcomes.",source:"Brand Voice Guide · §3.2",severity:"high",term:"guaranteed",suggestion:"Explore a savings option designed around your goals."},{id:"PF-104",type:"Fact mismatch",title:"Savings rate does not match the approved fact",detail:"The draft states 7%, but the current approved rate is 5% p.a.",source:"Approved Facts Ledger · PF-104",severity:"critical",term:"7% returns",suggestion:"Earn 5% p.a. with PayNest Smart Savings."},{id:"BR-02",type:"Prohibited language",title:"“risk-free” is prohibited",detail:"Avoid implying a financial product has no risk.",source:"Brand Voice Guide · §3.2",severity:"high",term:"risk-free",suggestion:"Remove the phrase and describe the product accurately."}];
-
-const nav=[["overview","Overview",Home],["reviews","Content reviews",FileCheck2],["claims","Claims ledger",Layers3],["guidelines","Brand guidelines",BookOpen],["insights","Guideline insights",Lightbulb],["audit","Audit trail",History]];
+const nav=[["overview","Dashboard",Home],["reviews","My drafts",FileCheck2],["claims","Claims ledger",Layers3],["guidelines","Brand guidelines",BookOpen],["insights","Guideline insights",Lightbulb],["audit","Audit trail",History]];
 
 function navigationForRole(isReviewer){
-  // Creators may read guidelines but governance controls remain reviewer-only.
-  return isReviewer ? nav : nav.filter(([id]) => ["overview", "reviews", "guidelines"].includes(id));
+  // Each role sees only the pages needed for its job. Claims and guidelines are read-only references for both roles.
+  const allowed = isReviewer
+    ? ["overview", "reviews", "claims", "guidelines", "insights", "audit"]
+    : ["overview", "reviews", "claims", "guidelines"];
+  return nav.filter(([id]) => allowed.includes(id)).map(([id,label,Icon]) => [
+    id,
+    id === "reviews" ? (isReviewer ? "Review queue" : "My drafts") : label,
+    Icon,
+  ]);
 }
 
 function Btn({children,onClick,kind="secondary",disabled=false}){return <button disabled={disabled} className={`${kind}-button`} onClick={onClick}>{children}</button>}
@@ -16,6 +21,20 @@ function Btn({children,onClick,kind="secondary",disabled=false}){return <button 
 function Pill({children,tone=""}){return <span className={`pill ${tone}`}><i/>{children}</span>}
 
 function Stat({label,value,note,Icon,delay=0}){return <motion.div className="stat" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay}}><div className="stat-label">{label}<span><Icon size={16}/></span></div><strong>{value}</strong><small>{note}</small></motion.div>}
+
+function draftStatusLabel(status){
+  const labels = {in_review:"Awaiting review",approved:"Approved",rejected:"Rejected",changes_requested:"Changes requested"};
+  return labels[status] || (status ? status.replaceAll("_", " ").replace(/^\w/, c => c.toUpperCase()) : "Saved");
+}
+function latestReviewerDecision(item){
+  return (Array.isArray(item?.decisions) ? item.decisions : []).filter(event => ["approved","rejected","changes_requested"].includes(event.action)).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0];
+}
+
+function isUsableSuggestion(value){
+  if(typeof value !== "string" || !value.trim() || /^human review required$/i.test(value.trim())) return false;
+  return !/^(please\s+)?(remove|delete|replace|rewrite|change|avoid|describe|explain|ask|use|consider|ensure|make sure|try|review|substantiate|verify|confirm|check)\b/i.test(value.trim())
+    && !/^(this|the) (phrase|claim|text|sentence|wording)\b/i.test(value.trim());
+}
 
 function mapBackendFindings(items){
   const labels = {
@@ -58,12 +77,35 @@ function mapBackendFindings(items){
     });
 }
 
+function NotificationMenu({isStaff,open,setOpen,notifications,unreadCount,readIds,onMarkAllRead,onOpenNotification,onRefresh}){
+  return <div style={{position:"relative"}}>
+    <button className="icon-btn" title="Notifications" aria-label={`Notifications${unreadCount?`, ${unreadCount} unread`:""}`} aria-expanded={open} onClick={()=>{setOpen(v=>!v);if(!open)onRefresh();}} style={{position:"relative"}}>
+      <Bell size={17}/>{unreadCount>0&&<span style={{position:"absolute",right:"-3px",top:"-4px",minWidth:"16px",height:"16px",padding:"0 3px",display:"grid",placeItems:"center",borderRadius:"99px",background:"#e87989",color:"#1b1014",fontSize:"9px",fontWeight:900,border:"2px solid var(--panel, #171c27)"}}>{unreadCount>9?"9+":unreadCount}</span>}
+    </button>
+    {open&&<>
+      <button aria-label="Close notifications" onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,zIndex:85,border:0,background:"transparent"}}/>
+      <section role="dialog" aria-label="Notifications" style={{position:"absolute",right:0,top:"calc(100% + 10px)",zIndex:90,width:"min(360px, calc(100vw - 32px))",maxHeight:"min(460px, 70vh)",overflowY:"auto",padding:"12px",border:"1px solid var(--border, #30394b)",borderRadius:"14px",background:"var(--panel, #171c27)",boxShadow:"0 20px 50px rgba(0,0,0,.38)",color:"inherit"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",marginBottom:"8px"}}>
+          <strong style={{fontSize:"13px"}}>Notifications</strong>
+          <button onClick={onMarkAllRead} disabled={!unreadCount} style={{border:0,background:"transparent",color:"var(--muted, #9da8bd)",fontSize:"10px",cursor:unreadCount?"pointer":"default",opacity:unreadCount?1:.5}}>Mark all read</button>
+        </div>
+        {notifications.length===0?<div style={{padding:"18px 8px",textAlign:"center",color:"var(--muted, #9da8bd)",fontSize:"12px"}}><Bell size={20}/><p style={{margin:"8px 0 0"}}>No notifications yet.</p><small>{isStaff?"Drafts waiting for review will appear here.":"Reviewer decisions will appear here."}</small></div>:notifications.slice(0,30).map(note=><button key={note.id} onClick={()=>onOpenNotification(note)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px",marginTop:"5px",border:0,borderRadius:"9px",background:readIds.includes(note.id)?"transparent":"rgba(127,152,232,.10)",color:"inherit",cursor:"pointer"}}>
+          <span style={{display:"flex",alignItems:"flex-start",gap:"8px"}}><span style={{width:"7px",height:"7px",marginTop:"5px",borderRadius:"50%",background:readIds.includes(note.id)?"transparent":"#9da8ff",flexShrink:0}}/><span style={{minWidth:0,flex:1}}><strong style={{display:"block",fontSize:"12px",lineHeight:1.4}}>{note.title}</strong><span style={{display:"block",fontSize:"11px",lineHeight:1.45,opacity:.82,marginTop:"3px"}}>{note.draftTitle}</span><span style={{display:"block",fontSize:"10px",lineHeight:1.45,opacity:.68,marginTop:"4px"}}>{note.detail}</span><small style={{display:"block",fontSize:"9px",opacity:.55,marginTop:"5px"}}>{note.created_at?new Date(note.created_at).toLocaleString():"Recent"}</small></span></span>
+        </button>)}
+      </section>
+    </>}
+  </div>;
+}
+
 export default function App(){
 
-const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=localStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[apiMode,setApiMode]=useState(api.configured?"API configured":"Demo mode"),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>localStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>localStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>localStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false);
+const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=sessionStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>sessionStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>sessionStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>sessionStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false),[notificationOpen,setNotificationOpen]=useState(false),[readNotificationIds,setReadNotificationIds]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`bl-notifications-read:${sessionStorage.getItem("bl-username")||"guest"}:${sessionStorage.getItem("bl-is-staff")==="true"?"reviewer":"creator"}`)||"[]")}catch{return []}});
+const [knowledgeData,setKnowledgeData]=useState({facts:[],rules:[]});
+const [knowledgeLoading,setKnowledgeLoading]=useState(false);
+const [knowledgeError,setKnowledgeError]=useState("");
 
 useEffect(()=>localStorage.setItem("bl-theme",theme),[theme]);
-useEffect(()=>localStorage.setItem("bl-page",page),[page]);
+useEffect(()=>sessionStorage.setItem("bl-page",page),[page]);
 useEffect(()=>{if(toast){let t=setTimeout(()=>setToast(""),3000);return()=>clearTimeout(t)}},[toast]);
 
 async function refreshSavedDrafts(){
@@ -113,9 +155,9 @@ async function deleteSelectedDrafts(deleteAll=false){
     }
     setSelectedDraftIds(current => current.filter(id => !deletedIds.has(id)));
     if(backendDraftId != null && deletedIds.has(Number(backendDraftId))){
-      setBackendDraftId(null); localStorage.removeItem("bl-last-draft-id");
+      setBackendDraftId(null); sessionStorage.removeItem("bl-last-draft-id");
       setDraft(""); setTitle("Untitled campaign draft"); setFindings([]); setResolved([]); setActive(null); setDecision(""); setStatus("Not reviewed");
-      setPage("overview"); localStorage.setItem("bl-page", "overview");
+      setPage("overview"); sessionStorage.setItem("bl-page", "overview");
     }
     await refreshSavedDrafts();
     setToast(errors.length ? `${deleted} draft(s) deleted; ${errors.length} could not be deleted.` : `${deleted} draft(s) deleted.`);
@@ -126,6 +168,12 @@ async function deleteSelectedDrafts(deleteAll=false){
 useEffect(()=>{
   if(!authenticated) return;
   let cancelled = false;
+  setKnowledgeLoading(true);
+  setKnowledgeError("");
+  api.knowledge()
+    .then(data => { if(!cancelled) setKnowledgeData({facts:Array.isArray(data?.facts)?data.facts:[],rules:Array.isArray(data?.rules)?data.rules:[]}); })
+    .catch(error => { if(!cancelled) setKnowledgeError(error.message || "Could not load brand knowledge."); })
+    .finally(() => { if(!cancelled) setKnowledgeLoading(false); });
   async function loadWorkspace(){
     try {
       const response = await api.listDrafts();
@@ -135,8 +183,8 @@ useEffect(()=>{
       console.error("Could not load saved drafts:", error);
     }
 
-    const savedId = localStorage.getItem("bl-last-draft-id");
-    const savedPage = localStorage.getItem("bl-page");
+    const savedId = sessionStorage.getItem("bl-last-draft-id");
+    const savedPage = sessionStorage.getItem("bl-page");
     if(savedId && savedPage === "reviews"){
       try {
         const saved = await api.getDraft(savedId);
@@ -149,13 +197,13 @@ useEffect(()=>{
         setFindings(list);
         setActive(list[0]?.id || null);
         setResolved(list.filter(f => f.state === "dismissed").map(f => f.id));
-        setStatus(saved.status === "approved" ? "Approved" :
+        setStatus(saved.status === "approved" ? "Approved" : saved.status === "rejected" ? "Rejected" : saved.status === "changes_requested" ? "Changes requested" :
           list.some(f => f.state === "open" || f.state === "acknowledged") ? "Changes requested" : "Ready for review");
         setPage("reviews");
       } catch(error) {
         console.error("Could not restore the last draft:", error);
         if(!cancelled) {
-          localStorage.removeItem("bl-last-draft-id");
+          sessionStorage.removeItem("bl-last-draft-id");
           setBackendDraftId(null);
         }
       }
@@ -167,8 +215,6 @@ useEffect(()=>{
 
 const activeFinding=findings.find(f=>f.id===active),open=findings.filter(f=>!resolved.includes(f.id)),completion=findings.length?Math.round(resolved.length/findings.length*100):0;
 
-function check(text){let out=[];if(/guaranteed/i.test(text))out.push(rules[0]);if(/\b7\s*%/i.test(text))out.push(rules[1]);if(/risk[- ]free/i.test(text))out.push(rules[2]);if(/best in india|number one|#1/i.test(text))out.push({id:"BR-07",type:"Unsupported superlative",title:"Superlative needs evidence",detail:"Claims such as “best” or “number one” need an approved source.",source:"Claims Policy · §2.1",severity:"medium",term:text.match(/best in india|number one|#1/i)?.[0],suggestion:"Replace this with a verifiable product benefit."});return out}
-
 async function login(e){
   e.preventDefault();
   setLoginBusy(true);
@@ -178,11 +224,11 @@ async function login(e){
     const username = loginData.username || loginUsername.trim();
     setCurrentUsername(username);
     setIsStaff(Boolean(loginData.is_staff));
-    localStorage.setItem("bl-username", username);
-    localStorage.setItem("bl-is-staff", String(Boolean(loginData.is_staff)));
+    sessionStorage.setItem("bl-username", username);
+    sessionStorage.setItem("bl-is-staff", String(Boolean(loginData.is_staff)));
     setAuthenticated(true);
     setLoginPassword("");
-    setApiMode("API connected");
+
   } catch (error) {
     setLoginError(error.message || "Login failed. Check your username and password.");
   } finally {
@@ -201,18 +247,21 @@ async function logout() {
   setAuthenticated(false);
   setCurrentUsername("");
   setIsStaff(false);
-  localStorage.removeItem("bl-username");
-  localStorage.removeItem("bl-is-staff");
+  sessionStorage.removeItem("bl-username");
+  sessionStorage.removeItem("bl-is-staff");
   setLoginUsername("");
   setLoginPassword("");
   setLoginError("");
+  setComment("");
+  setPage("overview");
+  sessionStorage.removeItem("bl-page");
   setBackendDraftId(null);
   setFindings([]);
   setResolved([]);
   setActive(null);
   setDecision("");
   setStatus("Not reviewed");
-  setApiMode(api.configured ? "API configured" : "Demo mode");
+
   setToast("");
 }
 
@@ -237,14 +286,14 @@ async function review(){
       ? await api.revise(backendDraftId, draft)
       : await api.createDraft({title, content: draft});
 
-    if (result?.id != null) { setBackendDraftId(result.id); localStorage.setItem("bl-last-draft-id", String(result.id)); }
+    if (result?.id != null) { setBackendDraftId(result.id); sessionStorage.setItem("bl-last-draft-id", String(result.id)); }
     await refreshSavedDrafts();
     const list = mapBackendFindings(result?.findings);
     setFindings(list);
     setActive(list[0]?.id || null);
     setResolved(list.filter(f => f.state === "dismissed").map(f => f.id));
     setStatus(list.some(f => f.state === "open") ? "Changes requested" : "Ready for review");
-    setApiMode("API connected");
+
     setVersions(v => [
       ...v,
       {
@@ -255,7 +304,7 @@ async function review(){
     ]);
     setToast(`${list.length} finding${list.length === 1 ? "" : "s"} returned by the backend`);
   } catch (error) {
-    setApiMode("API error");
+
     setToast(error.message || "Could not save the draft to the backend.");
   } finally {
     setBusy(false);
@@ -364,33 +413,35 @@ async function markReviewed(f){
 }
 
 async function decide(d){
-  if (d === "approved") {
-    if (!backendDraftId) {
-      setToast("Run a backend review before approving this draft.");
-      return;
-    }
-    try {
-      const result = await api.approve(backendDraftId, comment);
-      setDecision("approved");
-      setStatus("Approved");
-      await refreshSavedDrafts();
-       setToast(result?.message || "Draft approval saved to the backend.");
-    } catch (error) {
-      setToast(error.message || "Approval failed. Resolve all findings first.");
-    }
+  if (!backendDraftId || !authenticated) {
+    setToast("Save and review this draft with the backend before recording a reviewer decision.");
     return;
   }
-
-  setDecision(d);
-  setStatus(d === "rejected" ? "Rejected" : "Changes requested");
-  setToast("This backend currently supports approval and finding decisions; whole-draft rejection and request-changes are not implemented yet.");
+  if (d !== "approved" && !comment.trim()) {
+    setToast("Add a reviewer comment before rejecting or requesting changes.");
+    return;
+  }
+  try {
+    const result = d === "approved"
+      ? await api.approve(backendDraftId, comment)
+      : await api.draftDecision(backendDraftId, d === "rejected" ? "rejected" : "changes_requested", comment);
+    setDecision(d);
+    setStatus(d === "approved" ? "Approved" : d === "rejected" ? "Rejected" : "Changes requested");
+    if (result?.status) {
+      setSavedDrafts(items => items.map(item => item.id === result.id ? result : item));
+    }
+    await refreshSavedDrafts();
+    setToast(d === "approved" ? "Approval saved to the backend." : "Reviewer decision saved to the audit trail.");
+  } catch (error) {
+    setToast(error.message || (d === "approved" ? "Approval failed. Resolve all findings first." : "Could not save the reviewer decision."));
+  }
 }
 
 async function openSavedDraft(id){
   try {
     const saved = await api.getDraft(id);
     setBackendDraftId(saved.id);
-    localStorage.setItem("bl-last-draft-id", String(saved.id));
+    sessionStorage.setItem("bl-last-draft-id", String(saved.id));
     setTitle(saved.title || "Untitled campaign draft");
     setDraft(saved.content || "");
     setCampaign("Saved campaign");
@@ -398,11 +449,11 @@ async function openSavedDraft(id){
     setFindings(list);
     setActive(list[0]?.id || null);
     setResolved(list.filter(f => f.state === "dismissed").map(f => f.id));
-    setStatus(saved.status === "approved" ? "Approved" :
+    setStatus(saved.status === "approved" ? "Approved" : saved.status === "rejected" ? "Rejected" : saved.status === "changes_requested" ? "Changes requested" :
       list.some(f => f.state === "open" || f.state === "acknowledged") ? "Changes requested" : "Ready for review");
     setDecision("");
     setPage("reviews");
-    localStorage.setItem("bl-page", "reviews");
+    sessionStorage.setItem("bl-page", "reviews");
     setToast("Saved draft loaded.");
   } catch(error) {
     setToast(error.message || "Could not open the saved draft.");
@@ -417,11 +468,64 @@ function newDraft(){
   setActive(null);
   setResolved([]);
   setBackendDraftId(null);
-  localStorage.removeItem("bl-last-draft-id");
+  sessionStorage.removeItem("bl-last-draft-id");
   setStatus("Not reviewed");
   setDecision("");
   setPage("reviews");
 }
+
+const allFindings = savedDrafts.flatMap(item => Array.isArray(item.findings) ? item.findings : []).filter(item => item.state !== "obsolete");
+const allDecisions = savedDrafts.flatMap(item => Array.isArray(item.decisions) ? item.decisions.map(decisionItem => ({...decisionItem,draftTitle:item.title,draftId:item.id})) : []);
+const findingCounts = allFindings.reduce((counts,item) => { const key=item.kind || "other"; counts[key]=(counts[key]||0)+1; return counts; },{});
+const topFindingPatterns = Object.entries(findingCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+const auditEvents = savedDrafts.flatMap(item => [
+  ...(Array.isArray(item.decisions)?item.decisions.map(event=>({...event,draftTitle:item.title,draftId:item.id,eventType:"decision"})):[]),
+  ...(Array.isArray(item.versions)?item.versions.map(event=>({id:`version-${item.id}-${event.version}`,action:`version_${event.version}`,comment:`Version ${event.version} saved`,actor_name:event.editor_name,created_at:event.created_at,draftTitle:item.title,draftId:item.id,eventType:"version"})):[]),
+]).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+const notifications = (isStaff
+  ? savedDrafts.filter(item => item.status === "in_review").map(item => ({
+      id: `review-${item.id}-${item.updated_at || item.created_at || "new"}`,
+      draftId: item.id,
+      draftTitle: item.title || `Draft ${item.id}`,
+      title: "Draft awaiting review",
+      detail: `Submitted by ${item.author_name || "a creator"}. Open to review the content and findings.`,
+      created_at: item.updated_at || item.created_at,
+    }))
+  : savedDrafts.flatMap(item => (Array.isArray(item.decisions) ? item.decisions : [])
+      .filter(event => ["approved", "rejected", "changes_requested"].includes(event.action))
+      .map(event => ({
+        id: `decision-${item.id}-${event.id}`,
+        draftId: item.id,
+        draftTitle: item.title || `Draft ${item.id}`,
+        title: event.action === "approved" ? "Draft approved" : event.action === "rejected" ? "Draft rejected" : "Changes requested",
+        detail: event.comment || (event.action === "approved" ? "The reviewer approved this draft." : event.action === "rejected" ? "The reviewer rejected this draft." : "The reviewer asked you to revise this draft."),
+        created_at: event.created_at,
+      }))))
+  .sort((a,b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+const unreadNotifications = notifications.filter(note => !readNotificationIds.includes(note.id));
+const notificationStorageKey = `bl-notifications-read:${currentUsername || "guest"}:${isStaff ? "reviewer" : "creator"}`;
+function markNotificationRead(id) {
+  setReadNotificationIds(current => {
+    const next = current.includes(id) ? current : [...current, id];
+    sessionStorage.setItem(notificationStorageKey, JSON.stringify(next));
+    return next;
+  });
+}
+function markAllNotificationsRead() {
+  const next = notifications.map(note => note.id);
+  sessionStorage.setItem(notificationStorageKey, JSON.stringify(next));
+  setReadNotificationIds(next);
+}
+function openNotification(note) {
+  markNotificationRead(note.id);
+  setNotificationOpen(false);
+  openSavedDraft(note.draftId);
+}
+useEffect(() => {
+  const key = `bl-notifications-read:${currentUsername || "guest"}:${isStaff ? "reviewer" : "creator"}`;
+  try { setReadNotificationIds(JSON.parse(sessionStorage.getItem(key) || "[]")); }
+  catch { setReadNotificationIds([]); }
+}, [currentUsername, isStaff]);
 
 const visibleNav = navigationForRole(isStaff);
 const titlePage=visibleNav.find(n=>n[0]===page)?.[1]||"Overview";
@@ -430,7 +534,7 @@ useEffect(()=>{
   const allowed = navigationForRole(isStaff).some(([id]) => id === page);
   if (!allowed) {
     setPage("overview");
-    localStorage.setItem("bl-page", "overview");
+    sessionStorage.setItem("bl-page", "overview");
   }
 }, [isStaff, page]);
 
@@ -497,10 +601,7 @@ return <div className={`app theme-${theme}`}>
       <span style={{flex:1,minWidth:0}}><strong style={{display:"block",fontSize:"14px"}}>PayNest</strong><small style={{display:"block",marginTop:"3px",color:"#9da8bd"}}>Brand governance workspace</small></span>
       <span title="Selected workspace" style={{width:"8px",height:"8px",borderRadius:"50%",background:"#5bd49a",boxShadow:"0 0 0 4px rgba(91,212,154,.12)"}}/>
     </div>
-    <div style={{display:"flex",gap:"8px",margin:"12px 0"}}>
-      <div style={{flex:1,padding:"9px",borderRadius:"9px",background:"rgba(255,255,255,.045)"}}><small style={{display:"block",fontSize:"10px",color:"#9da8bd"}}>WORKSPACE</small><b style={{display:"block",fontSize:"12px",marginTop:"4px"}}>Demo environment</b></div>
-      <div style={{flex:1,padding:"9px",borderRadius:"9px",background:"rgba(91,212,154,.07)"}}><small style={{display:"block",fontSize:"10px",color:"#9da8bd"}}>CONNECTION</small><b style={{display:"block",fontSize:"12px",marginTop:"4px",color:"#8ee0b1"}}>{apiMode==="API connected"?"API connected":apiMode}</b></div>
-    </div>
+    <div style={{display:"flex",gap:"8px",margin:"12px 0"}}><div style={{flex:1,padding:"9px",borderRadius:"9px",background:"rgba(255,255,255,.045)"}}><small style={{display:"block",fontSize:"10px",color:"#9da8bd"}}>WORKSPACE</small><b style={{display:"block",fontSize:"12px",marginTop:"4px"}}>Brand governance</b></div></div>
     <small style={{display:"block",fontSize:"10px",fontWeight:800,letterSpacing:"1px",color:"#8d98ae",margin:"2px 0 6px"}}>WORKSPACE SHORTCUTS</small>
     {[
       ["Claims ledger",Layers3,"claims","Review approved product facts"],
@@ -517,39 +618,39 @@ return <div className={`app theme-${theme}`}>
 
 {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close navigation"/>}
 
-<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><span className="api-state"><i/>{apiMode}</span><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><button className="icon-btn" title="Notifications" onClick={()=>setToast("You're all caught up.")}><Bell size={17}/></button><div style={{position:"relative",display:"flex",alignItems:"center"}}><button type="button" aria-haspopup="menu" aria-expanded={profileOpen} onClick={()=>setProfileOpen(v=>!v)} style={{display:"flex",alignItems:"center",gap:"9px",padding:"5px 9px 5px 5px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"12px",color:"inherit",cursor:"pointer",minHeight:"42px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{display:"flex",flexDirection:"column",textAlign:"left",lineHeight:1.2}}><strong style={{fontSize:"11px",maxWidth:"100px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUsername||"Signed-in user"}</strong><small style={{fontSize:"10px",opacity:.7,marginTop:"3px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span><ChevronDown size={14}/></button>{profileOpen&&<><button aria-label="Close profile menu" onClick={()=>setProfileOpen(false)} style={{position:"fixed",inset:0,zIndex:70,border:0,background:"transparent",cursor:"default"}}/><div role="menu" style={{position:"absolute",right:0,top:"calc(100% + 9px)",zIndex:80,width:"230px",padding:"10px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"14px",boxShadow:"0 20px 50px rgba(0,0,0,.35)",color:"inherit"}}><div style={{display:"flex",alignItems:"center",gap:"10px",padding:"8px 7px 12px",borderBottom:"1px solid var(--border, #30394b)",marginBottom:"7px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{minWidth:0}}><strong style={{display:"block",fontSize:"12px",overflowWrap:"anywhere"}}>{currentUsername||"Signed-in user"}</strong><small style={{display:"block",fontSize:"10px",opacity:.7,marginTop:"4px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span></div><button role="menuitem" onClick={()=>{setProfileOpen(false);setToast("You're signed in as "+(currentUsername||"user")+".")}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"inherit",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><ShieldCheck size={15}/> Account information</button><button role="menuitem" onClick={()=>{setProfileOpen(false);logout()}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"#e87989",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><LogOut size={15}/> Log out</button></div></>}</div></div></header>
+<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><NotificationMenu isStaff={isStaff} open={notificationOpen} setOpen={setNotificationOpen} notifications={notifications} unreadCount={unreadNotifications.length} readIds={readNotificationIds} onMarkAllRead={markAllNotificationsRead} onOpenNotification={openNotification} onRefresh={refreshSavedDrafts}/><div style={{position:"relative",display:"flex",alignItems:"center"}}><button type="button" aria-haspopup="menu" aria-expanded={profileOpen} onClick={()=>setProfileOpen(v=>!v)} style={{display:"flex",alignItems:"center",gap:"9px",padding:"5px 9px 5px 5px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"12px",color:"inherit",cursor:"pointer",minHeight:"42px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{display:"flex",flexDirection:"column",textAlign:"left",lineHeight:1.2}}><strong style={{fontSize:"11px",maxWidth:"100px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUsername||"Signed-in user"}</strong><small style={{fontSize:"10px",opacity:.7,marginTop:"3px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span><ChevronDown size={14}/></button>{profileOpen&&<><button aria-label="Close profile menu" onClick={()=>setProfileOpen(false)} style={{position:"fixed",inset:0,zIndex:70,border:0,background:"transparent",cursor:"default"}}/><div role="menu" style={{position:"absolute",right:0,top:"calc(100% + 9px)",zIndex:80,width:"230px",padding:"10px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"14px",boxShadow:"0 20px 50px rgba(0,0,0,.35)",color:"inherit"}}><div style={{display:"flex",alignItems:"center",gap:"10px",padding:"8px 7px 12px",borderBottom:"1px solid var(--border, #30394b)",marginBottom:"7px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{minWidth:0}}><strong style={{display:"block",fontSize:"12px",overflowWrap:"anywhere"}}>{currentUsername||"Signed-in user"}</strong><small style={{display:"block",fontSize:"10px",opacity:.7,marginTop:"4px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span></div><button role="menuitem" onClick={()=>{setProfileOpen(false);setToast("You're signed in as "+(currentUsername||"user")+".")}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"inherit",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><ShieldCheck size={15}/> Account information</button><button role="menuitem" onClick={()=>{setProfileOpen(false);logout()}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"#e87989",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><LogOut size={15}/> Log out</button></div></>}</div></div></header>
 
 <div className="content"><AnimatePresence mode="wait">
 
-{page==="overview"&&<motion.section key="overview" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"> <i/> TUESDAY, OCTOBER 22, 2026</div><h1>Good morning, {currentUsername||"there"} <em>✳</em></h1><p>{isStaff ? "Review submissions, resolve findings, and keep brand decisions traceable." : "Create content, check it against approved guidance, and track your own submissions."}</p></div><Btn kind="primary" onClick={newDraft}><Plus size={16}/> {isStaff ? "Open review workspace" : "Create content"}</Btn></div>
+{page==="overview"&&<motion.section key="overview" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"> <i/> {new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric",year:"numeric"}).toUpperCase()}</div><h1>Good morning, {currentUsername||"there"} <em>✳</em></h1><p>{isStaff ? "Review submissions, resolve findings, and keep brand decisions traceable." : "Create content, check it against approved guidance, and track your own submissions."}</p></div><Btn kind="primary" onClick={()=>isStaff?setPage("reviews"):newDraft()}>{isStaff?<><FileCheck2 size={16}/> Open review queue</>:<><Plus size={16}/> Create draft</>}</Btn></div>
 
-<div className="hero"><div className="hero-copy"><span><Sparkles size={14}/> BRAND INTELLIGENCE</span><h2>Consistency isn't a coincidence.<br/><em>It's a system.</em></h2><p>Every claim checked. Every decision traceable. Every voice on-brand.</p><button onClick={()=>setPage("reviews")}>Open review studio <ArrowRight size={15}/></button></div><div className="orbit-art"><div className="orbit o1"/><div className="orbit o2"/><div className="orbit o3"/><div className="core"><ShieldCheck size={36}/></div><label>✓ VERIFIED FACTS</label><label>⌑ HUMAN REVIEW</label><label>↗ LIVE TRACE</label></div></div>
+<div className="hero"><div className="hero-copy"><span><Sparkles size={14}/> BRAND INTELLIGENCE</span><h2>Consistency isn't a coincidence.<br/><em>It's a system.</em></h2><p>Every claim checked. Every decision traceable. Every voice on-brand.</p><button onClick={()=>setPage("reviews")}>{isStaff?"Open review queue":"Open my drafts"} <ArrowRight size={15}/></button></div><div className="orbit-art"><div className="orbit o1"/><div className="orbit o2"/><div className="orbit o3"/><div className="core"><ShieldCheck size={36}/></div><label>✓ VERIFIED FACTS</label><label>⌑ HUMAN REVIEW</label><label>↗ LIVE TRACE</label></div></div>
 
-<div className="section-head"><div><h2>{isStaff ? "Review workspace at a glance" : "Your content workspace"}</h2><p>{isStaff ? "Review activity and governance signals." : "Start a draft or open your saved submissions to continue working."}</p></div><div>{isStaff&&<button onClick={()=>setPage("audit")}>View activity <ArrowRight size={14}/></button>}</div></div>{isStaff?<div className="stats"><Stat label="Reviews this month" value="128" note="Illustrative demo metric" Icon={FileCheck2} delay={.03}/><Stat label="Issues caught" value="346" note="Illustrative demo metric" Icon={ShieldAlert} delay={.08}/><Stat label="Awaiting approval" value="04" note="Illustrative demo metric" Icon={Clock3} delay={.13}/><Stat label="Brand consistency" value="94.2%" note="Illustrative demo metric" Icon={Gauge} delay={.18}/></div>:<section className="panel" style={{padding:"20px",marginBottom:"18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"16px",flexWrap:"wrap"}}><div><b style={{display:"block",fontSize:"15px"}}>Your saved submissions</b><p style={{margin:"6px 0 0",fontSize:"12px",opacity:.72}}>Drafts available in your workspace: {savedDrafts.length}</p></div><Btn kind="primary" onClick={()=>{setPage("reviews");newDraft()}}><Plus size={14}/> Create a draft</Btn></section>}
+<div className="section-head"><div><h2>{isStaff ? "Review workspace at a glance" : "Your content workspace"}</h2><p>{isStaff ? "Review activity and governance signals." : "Start a draft or open your saved submissions to continue working."}</p></div><div>{isStaff&&<button onClick={()=>setPage("audit")}>View activity <ArrowRight size={14}/></button>}</div></div>{isStaff?<div className="stats"><Stat label="Saved drafts" value={savedDrafts.length} note="Accessible backend records" Icon={FileCheck2} delay={.03}/><Stat label="Active findings" value={allFindings.length} note="Excludes obsolete versions" Icon={ShieldAlert} delay={.08}/><Stat label="Awaiting decision" value={savedDrafts.filter(item=>["in_review","changes_requested"].includes(item.status)).length} note="Not yet approved or rejected" Icon={Clock3} delay={.13}/><Stat label="Approval rate" value={savedDrafts.length?Math.round(savedDrafts.filter(item=>item.status==="approved").length/savedDrafts.length*100)+"%":"—"} note="Approved drafts / all accessible drafts" Icon={Gauge} delay={.18}/></div>:<section className="panel" style={{padding:"20px",marginBottom:"18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"16px",flexWrap:"wrap"}}><div><b style={{display:"block",fontSize:"15px"}}>Your saved submissions</b><p style={{margin:"6px 0 0",fontSize:"12px",opacity:.72}}>Drafts available in your workspace: {savedDrafts.length}</p></div>{isStaff?<Btn kind="primary" onClick={()=>setPage("reviews")}><FileCheck2 size={14}/> Open review queue</Btn>:<Btn kind="primary" onClick={newDraft}><Plus size={14}/> Create a draft</Btn>}</section>}
 
-{isStaff&&<div className="dash-grid"><section className="panel queue"><div className="panel-head"><div><h3>Needs your attention</h3><p>Content waiting for a decision</p></div><button onClick={()=>setPage("reviews")}>View queue <ArrowRight size={14}/></button></div>{[{title:"Smart Savings launch copy",meta:"Paid social · Jaiveer Singh · 18 min ago",tag:"3 findings",tone:"red"},{title:"Rewards email campaign",meta:"Email · Ananya Rao · 42 min ago",tag:"1 finding",tone:"amber"},{title:"App onboarding message",meta:"In-app · Rohan Mehta · 1 hr ago",tag:"No critical findings",tone:"green"}].map((x,i)=><button className="queue-row" key={x.title} onClick={()=>{setTitle(x.title);setDraft(i===0?seed:i===1?"Get the best rewards in India with PayNest. Sign up today and enjoy simple payments.":"Welcome to PayNest. Open your account in minutes with a simple, secure setup.");setBackendDraftId(null);setFindings([]);setResolved([]);setPage("reviews")}}><span className="file-icon"><FileText size={17}/></span><span className="queue-copy"><b>{x.title}</b><small>{x.meta}</small><em className={x.tone}>{x.tag}</em></span><span className="queue-status"><Pill tone={i===2?"good":"warn"}>{i===2?"Ready to approve":"Review needed"}</Pill><ChevronRight size={15}/></span></button>)}<button className="queue-footer" onClick={()=>setPage("reviews")}>Open full review queue <ArrowRight size={14}/></button></section>
+{isStaff&&<div className="dash-grid"><section className="panel queue"><div className="panel-head"><div><h3>Needs your attention</h3><p>Saved drafts that have not been approved or rejected</p></div><button onClick={()=>setPage("reviews")}>View workspace <ArrowRight size={14}/></button></div>{savedDrafts.filter(item=>item.status!=="approved"&&item.status!=="rejected").slice(0,3).map(item=>{const unresolved=(item.findings||[]).filter(f=>f.state==="open"||f.state==="acknowledged");return <button className="queue-row" key={item.id} onClick={()=>openSavedDraft(item.id)}><span className="file-icon"><FileText size={17}/></span><span className="queue-copy"><b>{item.title||`Draft ${item.id}`}</b><small>{item.author_name||"Unknown author"} · {item.updated_at?new Date(item.updated_at).toLocaleString():"Date unavailable"}</small><em className={unresolved.length?"red":"green"}>{unresolved.length} unresolved finding{unresolved.length===1?"":"s"}</em></span><span className="queue-status"><Pill tone={unresolved.length?"warn":"good"}>{item.status||"In review"}</Pill><ChevronRight size={15}/></span></button>})}{!savedDrafts.some(item=>item.status!=="approved"&&item.status!=="rejected")&&<div className="empty"><b>No drafts waiting for review</b><p>Newly saved drafts will appear here.</p></div>}<button className="queue-footer" onClick={()=>setPage("reviews")}>Open review workspace <ArrowRight size={14}/></button></section>
 
-<section className="panel issues"><div className="panel-head"><div><h3>Common issue types</h3><p>Findings across the last 30 days</p></div><Activity size={16}/></div>{[{name:"Unsupported claims",n:48,w:78,c:"coral"},{name:"Outdated facts",n:36,w:58,c:"amber"},{name:"Off-brand language",n:27,w:44,c:"violet"},{name:"Accessibility",n:14,w:23,c:"blue"}].map((x,i)=><div className="bar-row" key={x.name}><span>{x.name}<b>{x.n}</b></span><div><motion.i className={x.c} initial={{width:0}} animate={{width:x.w+"%"}} transition={{duration:.7,delay:i*.08}}/></div></div>)}<button className="insight-box" onClick={()=>setPage("insights")}><Lightbulb size={17}/><span><b>One guideline may need clarification</b><small>“Promotional claims” has 8 reviewer overrides this month.</small></span><ChevronRight size={15}/></button></section></div>}<div className="disclaimer"><Shield size={14}/> BrandLedger is a review aid, not a guarantee of compliance. Human approval is always required.</div></motion.section>}
+<section className="panel issues"><div className="panel-head"><div><h3>Common issue types</h3><p>Saved finding records, excluding obsolete versions</p></div><Activity size={16}/></div>{topFindingPatterns.map(([kind,count],i)=>{const max=Math.max(1,...topFindingPatterns.map(([,n])=>n));return <div className="bar-row" key={kind}><span>{kind.replaceAll("_"," ")}<b>{count}</b></span><div><motion.i className={["coral","amber","violet"][i%3]} initial={{width:0}} animate={{width:Math.round(count/max*100)+"%"}} transition={{duration:.7,delay:i*.08}}/></div></div>})}{!topFindingPatterns.length&&<p className="table-foot">No saved findings yet. Run a review to populate this section.</p>}<button className="insight-box" onClick={()=>setPage("insights")}><Lightbulb size={17}/><span><b>Explore review patterns</b><small>{allDecisions.filter(item=>item.action==="dismissed").length} finding dismissals have been recorded in the backend.</small></span><ChevronRight size={15}/></button></section></div>}<div className="disclaimer"><Shield size={14}/> BrandLedger is a review aid, not a guarantee of compliance. Human approval is always required.</div></motion.section>}
 
-{page==="reviews"&&<motion.section key="reviews" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> CONTENT GOVERNANCE / REVIEW STUDIO</div><h1>Review workspace</h1><p>Inspect every finding. Understand the evidence. Keep the final call.</p></div><div className="head-buttons"><Btn onClick={()=>setHistory(v=>!v)}><History size={15}/> Version history</Btn><Btn kind="primary" onClick={newDraft}><Plus size={15}/> New draft</Btn></div></div>
+{page==="reviews"&&<motion.section key="reviews" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> CONTENT GOVERNANCE / REVIEW STUDIO</div><h1>{isStaff?"Review queue":"My drafts"}</h1><p>{isStaff?"Read submitted content, review findings, and record a decision. Draft text is read-only for reviewers.":"Create drafts, run brand checks, apply suitable suggestions, and revise your own content."}</p></div><div className="head-buttons">{!isStaff&&<Btn onClick={()=>setHistory(v=>!v)}><History size={15}/> Version history</Btn>}<Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}><RefreshCw size={14}/> Refresh</Btn>{!isStaff&&<Btn kind="primary" onClick={newDraft}><Plus size={15}/> New draft</Btn>}</div></div>
 
-{history&&<motion.div className="history-strip" initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}}><b><GitCompareArrows size={15}/> Saved versions <small>{versions.length} versions</small></b><div>{versions.map((v,i)=><button key={i} onClick={()=>{setDraft(v.text);setToast(v.name+" restored")}}><strong>{v.name}</strong><small>{v.time}</small></button>)}</div></motion.div>}
+{!isStaff&&history&&<motion.div className="history-strip" initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}}><b><GitCompareArrows size={15}/> Saved versions <small>{versions.length} versions</small></b><div>{versions.map((v,i)=><button key={i} onClick={()=>{setDraft(v.text);setToast(v.name+" restored")}}><strong>{v.name}</strong><small>{v.time}</small></button>)}</div></motion.div>}
 
 <section className="panel" style={{padding:"13px 16px",marginBottom:"14px"}}>
   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px",flexWrap:"wrap"}}>
     <div style={{display:"flex",alignItems:"center",gap:"10px",minWidth:0}}>
       <span style={{width:"34px",height:"34px",borderRadius:"10px",display:"grid",placeItems:"center",background:"rgba(117,132,255,.12)",color:"#9da8ff",flexShrink:0}}><FolderOpen size={17}/></span>
-      <div style={{minWidth:0}}><b style={{fontSize:"14px"}}>Saved drafts <span style={{fontSize:"11px",fontWeight:600,opacity:.7,marginLeft:"5px"}}>{savedDrafts.length}</span></b><div style={{fontSize:"12px",opacity:.68,marginTop:"3px"}}>Your drafts, saved in the backend.</div></div>
+      <div style={{minWidth:0}}><b style={{fontSize:"14px"}}>{isStaff?"Submitted drafts":"My saved drafts"} <span style={{fontSize:"11px",fontWeight:600,opacity:.7,marginLeft:"5px"}}>{savedDrafts.length}</span></b><div style={{fontSize:"12px",opacity:.68,marginTop:"3px"}}>{isStaff?"Open a submission to inspect it and record a reviewer decision.":"Your drafts are saved here so you can reopen and revise them."}</div></div>
     </div>
     <div style={{display:"flex",alignItems:"center",gap:"7px",flexWrap:"wrap",flexShrink:0}}>
       <button className="icon-btn" title="Refresh saved drafts" onClick={refreshSavedDrafts} disabled={loadingSavedDrafts || deletingDrafts} style={{width:"32px",height:"32px"}}>{loadingSavedDrafts?<span className="spinner"/>:<RefreshCw size={14}/>}</button>
-      {savedDrafts.length>0&&<Btn onClick={()=>{setShowAllSavedDrafts(v=>!v);setSelectedDraftIds([])}}>{showAllSavedDrafts?"Show recent":"Manage drafts"} <ChevronDown size={14}/></Btn>}
+      {!isStaff&&savedDrafts.length>0&&<Btn onClick={()=>{setShowAllSavedDrafts(v=>!v);setSelectedDraftIds([])}}>{showAllSavedDrafts?"Show recent":"Manage my drafts"} <ChevronDown size={14}/></Btn>}
     </div>
   </div>
   {savedDrafts.length===0
-    ? <div style={{marginTop:"12px",padding:"12px",borderRadius:"10px",border:"1px dashed var(--border, #343a49)",fontSize:"12px",opacity:.75}}>{loadingSavedDrafts?"Loading saved drafts…":authenticated?"No saved drafts yet. Run a review to save your first draft.":"Sign in to load saved drafts."}</div>
+    ? <div style={{marginTop:"12px",padding:"12px",borderRadius:"10px",border:"1px dashed var(--border, #343a49)",fontSize:"12px",opacity:.75}}>{loadingSavedDrafts?"Loading saved drafts…":authenticated?(isStaff?"No submissions are available to review yet.":"No saved drafts yet. Create a draft and run a brand review to save it."):"Sign in to load drafts."}</div>
     : <>
-      {showAllSavedDrafts&&<>
+      {!isStaff&&showAllSavedDrafts&&<>
         <input aria-label="Search saved drafts" value={savedDraftSearch} onChange={e=>setSavedDraftSearch(e.target.value)} placeholder="Search drafts by title or status…" style={{width:"100%",marginTop:"12px",padding:"9px 11px",borderRadius:"9px",border:"1px solid var(--border, #343a49)",background:"transparent",color:"inherit",fontSize:"12px",boxSizing:"border-box"}}/>
         <div style={{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap",marginTop:"10px"}}>
           <button type="button" onClick={()=>selectAllVisibleDrafts(savedDrafts.filter(item=>`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())))} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"7px 9px",border:"1px solid var(--border, #343a49)",borderRadius:"8px",background:"transparent",color:"inherit",fontSize:"11px",cursor:"pointer"}}><CheckSquare size={13}/> Select all eligible</button>
@@ -561,35 +662,36 @@ return <div className={`app theme-${theme}`}>
       </>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:"8px",marginTop:"12px"}}>
         {savedDrafts.filter(item=>!showAllSavedDrafts||`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).slice(0,showAllSavedDrafts?savedDrafts.length:3).map(item=><div key={item.id} style={{display:"flex",alignItems:"center",gap:"8px",textAlign:"left",padding:"8px",borderRadius:"10px",border:"1px solid var(--border, #343a49)",background:"rgba(255,255,255,.018)",minWidth:0,transition:"border-color .18s, background .18s"}}>
-          {showAllSavedDrafts&&<input type="checkbox" aria-label={`Select ${item.title||`draft ${item.id}`}`} checked={selectedDraftIds.includes(item.id)} disabled={item.status==="approved"||deletingDrafts} onChange={()=>toggleDraftSelection(item.id)} title={item.status==="approved"?"Approved drafts are protected from deletion":"Select draft"} style={{accentColor:"#9da8ff",flexShrink:0}}/>}
+          {!isStaff&&showAllSavedDrafts&&<input type="checkbox" aria-label={`Select ${item.title||`draft ${item.id}`}`} checked={selectedDraftIds.includes(item.id)} disabled={item.status==="approved"||deletingDrafts} onChange={()=>toggleDraftSelection(item.id)} title={item.status==="approved"?"Approved drafts are protected from deletion":"Select draft"} style={{accentColor:"#9da8ff",flexShrink:0}}/>}
           <button type="button" onClick={()=>openSavedDraft(item.id)} style={{display:"flex",alignItems:"center",gap:"9px",textAlign:"left",padding:"3px",border:0,background:"transparent",color:"inherit",cursor:"pointer",minWidth:0,flex:1}}>
             <span style={{width:"30px",height:"30px",borderRadius:"8px",display:"grid",placeItems:"center",background:"rgba(255,255,255,.045)",flexShrink:0}}><FileText size={15}/></span>
-            <span style={{display:"block",minWidth:0,flex:1}}><b style={{display:"block",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title || `Draft ${item.id}`}</b><small style={{display:"block",opacity:.68,marginTop:"4px",fontSize:"10px"}}>#{item.id} · {item.status || "saved"}{item.status==="approved"?" · protected":""}</small></span><ChevronRight size={14} style={{opacity:.6,flexShrink:0}}/>
+            <span style={{display:"block",minWidth:0,flex:1}}><b style={{display:"block",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.title || `Draft ${item.id}`}</b><small style={{display:"block",opacity:.78,marginTop:"4px",fontSize:"10px"}}>#{item.id} · {draftStatusLabel(item.status)}{item.status==="approved"?" · protected":""}</small>{!isStaff&&latestReviewerDecision(item)&&<small style={{display:"block",opacity:.72,marginTop:"4px",fontSize:"10px",lineHeight:1.4}}>{latestReviewerDecision(item).comment || (latestReviewerDecision(item).action==="approved"?"Approved by reviewer.":latestReviewerDecision(item).action==="rejected"?"Rejected by reviewer.":"Changes requested by reviewer.")}</small>}</span><ChevronRight size={14} style={{opacity:.6,flexShrink:0}}/>
           </button>
         </div>)}
       </div>
       {showAllSavedDrafts&&savedDrafts.filter(item=>`${item.title||""} ${item.status||""} ${item.id}`.toLowerCase().includes(savedDraftSearch.toLowerCase())).length===0&&<small style={{display:"block",marginTop:"10px",opacity:.7}}>No drafts match that search.</small>}
     </>}
 </section>
-<div className="docbar"><span className="file-icon"><FileText size={17}/></span><span className="docname"><b>{title}</b><small>{campaign} · Last edited just now</small></span><button className="icon-btn" title="Rename draft" onClick={()=>{let t=prompt("Rename draft",title);if(t?.trim())setTitle(t.trim())}}><Settings2 size={15}/></button><Pill tone={status==="Approved"?"good":status==="Not reviewed"?"": "warn"}>{status}</Pill></div>
+{!isStaff&&backendDraftId&&["Approved","Rejected","Changes requested"].includes(status)&&<section className="panel" style={{padding:"12px 15px",marginBottom:"14px",border:"1px solid var(--border, #343a49)",borderLeft:`3px solid ${status==="Approved"?"#5bd49a":status==="Rejected"?"#e87989":"#e8b45b"}`}}><b style={{fontSize:"13px"}}>Reviewer outcome: {status}</b><p style={{fontSize:"12px",lineHeight:1.5,opacity:.8,margin:"5px 0 0"}}>{latestReviewerDecision(savedDrafts.find(item=>String(item.id)===String(backendDraftId)))?.comment || (status==="Approved"?"The reviewer approved this draft.":status==="Rejected"?"The reviewer rejected this draft.":"Please revise this draft based on the reviewer feedback.")}</p></section>}
+{(!isStaff||backendDraftId)&&<div className="docbar"><span className="file-icon"><FileText size={17}/></span><span className="docname"><b>{title}</b><small>{campaign} · Last edited just now</small></span>{!isStaff&&<button className="icon-btn" title="Rename draft" onClick={()=>{let t=prompt("Rename draft",title);if(t?.trim())setTitle(t.trim())}}><Settings2 size={15}/></button>}<Pill tone={status==="Approved"?"good":status==="Not reviewed"?"": "warn"}>{status}</Pill></div>}
 
-<div className={`review-grid ${!showEvidence?"wide":""}`}><section className="panel editor"><div className="editor-head"><span><i/> CONTENT DRAFT <small>· Plain text</small></span><button onClick={()=>setShowEvidence(v=>!v)}><PanelRightClose size={15}/></button></div><div className="fields"><label>CONTENT TITLE<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>CAMPAIGN<input value={campaign} onChange={e=>setCampaign(e.target.value)}/></label></div><label className="draft-label">Draft content <small>· {draft.trim()?draft.trim().split(/\s+/).length:0} words</small></label><textarea className="draft" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Paste campaign copy here…" spellCheck/><div className="editor-foot"><span><LockKeyhole size={13}/> Original stays unchanged until you apply a suggestion.</span><span>{draft.length} chars</span></div>{findings.length>0&&<div className="highlight-preview"><div> <Sparkles size={13}/> FLAGGED CONTENT PREVIEW <small>Click a phrase to inspect it</small></div><p>{draft.split(/(guaranteed|7% returns|risk-free)/gi).map((part,i)=>{let f=findings.find(x=>x.term?.toLowerCase()===part.toLowerCase());return f?<mark key={i} className={`${f.severity} ${active===f.id?"chosen":""}`} onClick={()=>setActive(f.id)}>{part}</mark>:<React.Fragment key={i}>{part}</React.Fragment>})}</p></div>}<div className="editor-actions"><Btn onClick={()=>{setFindings([]);setResolved([]);setStatus("Not reviewed");setToast("Findings cleared")}}><X size={14}/> Clear findings</Btn><Btn kind="primary" disabled={busy} onClick={review}>{busy?<><span className="spinner"/> Checking content…</>:<><Sparkles size={15}/> Run brand review <ArrowRight size={15}/></>}</Btn></div><div className="method-note"><ShieldCheck size={14}/> Deterministic checks run first. AI interpretation is handled by the backend when enabled.</div></section>
+<div className={`review-grid ${!showEvidence?"wide":""}`}>{!isStaff ? <section className="panel editor"><div className="editor-head"><span><i/> CONTENT DRAFT <small>· Plain text</small></span><button onClick={()=>setShowEvidence(v=>!v)}><PanelRightClose size={15}/></button></div><div className="fields"><label>CONTENT TITLE<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>CAMPAIGN<input value={campaign} onChange={e=>setCampaign(e.target.value)}/></label></div><label className="draft-label">Draft content <small>· {draft.trim()?draft.trim().split(/\s+/).length:0} words</small></label><textarea className="draft" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Paste campaign copy here…" spellCheck/><div className="editor-foot"><span><LockKeyhole size={13}/> Original stays unchanged until you apply a suggestion.</span><span>{draft.length} chars</span></div>{findings.length>0&&<div className="highlight-preview"><div> <Sparkles size={13}/> FLAGGED CONTENT PREVIEW <small>Click a phrase to inspect it</small></div><p>{draft.split(/(guaranteed|7%|risk-free)/gi).map((part,i)=>{let f=findings.find(x=>x.term?.toLowerCase()===part.toLowerCase());return f?<mark key={i} className={`${f.severity} ${active===f.id?"chosen":""}`} onClick={()=>setActive(f.id)}>{part}</mark>:<React.Fragment key={i}>{part}</React.Fragment>})}</p></div>}<div className="editor-actions"><Btn onClick={()=>{setFindings([]);setResolved([]);setStatus("Not reviewed");setToast("Findings cleared")}}><X size={14}/> Clear findings</Btn><Btn kind="primary" disabled={busy} onClick={review}>{busy?<><span className="spinner"/> Checking content…</>:<><Sparkles size={15}/> Run brand review <ArrowRight size={15}/></>}</Btn></div><div className="method-note"><ShieldCheck size={14}/> Deterministic checks run first. AI interpretation is handled by the backend when enabled.</div></section> : <section className="panel editor"><div className="editor-head"><span><i/> SUBMITTED CONTENT <small>· Read-only for reviewers</small></span><span><LockKeyhole size={13}/> Creator edits this draft</span></div><div className="fields"><label>CONTENT TITLE<input value={title} readOnly/></label><label>CAMPAIGN<input value={campaign} readOnly/></label></div><label className="draft-label">Submitted draft</label><div className="draft" style={{whiteSpace:"pre-wrap",minHeight:"260px",cursor:"default"}}>{backendDraftId ? (draft || "This submission has no text content.") : "Choose a submission from the list below to inspect its content and findings."}</div><div className="method-note"><ShieldCheck size={14}/> Reviewers can inspect findings and leave a decision, but cannot edit the creator’s text.</div></section>}
 
-{showEvidence&&<aside className="panel evidence"><div className="panel-head"><div><h3>Review findings <span className="count">{open.length}</span></h3><p>{findings.length?`${resolved.length} of ${findings.length} addressed`:"Run a review to see evidence-backed findings."}</p></div><button title="Cycle finding filter" onClick={()=>setFindings(f=>[...f].reverse())}><Filter size={15}/></button></div>{findings.length>0&&<div className="progress"><span>Resolution progress <b>{completion}%</b></span><div><i style={{width:completion+"%"}}/></div></div>}{!findings.length?<div className="empty"><span><ShieldCheck size={29}/><Sparkles size={13}/></span><b>Your evidence panel is ready</b><p>Run a review to see each issue, the source rule, and a suggested next step.</p><small>✓ Approved facts　 ✓ Prohibited phrases　 ✓ Claim evidence</small></div>:<div className="finding-list">{findings.map((f,i)=><motion.button key={f.id} className={`finding ${active===f.id?"selected":""} ${resolved.includes(f.id)?"resolved":""}`} onClick={()=>setActive(f.id)} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:i*.06}}><span className={`finding-icon ${f.severity}`}>{f.severity==="critical"?<ShieldAlert size={16}/>:<Flag size={16}/>}</span><span className="finding-body"><small>{f.type}<b className={f.severity}>{resolved.includes(f.id)?"RESOLVED":f.severity.toUpperCase()}</b></small><strong>{f.title}</strong><em>{f.detail}</em><label><BookOpen size={12}/>{f.source}</label></span><ChevronRight size={14}/></motion.button>)}</div>}
-
-
-{activeFinding&&<AnimatePresence mode="wait"><motion.div key={activeFinding.id} className="evidence-detail" initial={{opacity:0,y:7}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="detail-kicker"><BookOpen size={13}/> EVIDENCE & EXPLANATION <b className={activeFinding.severity}>{activeFinding.severity.toUpperCase()}</b></div><h4>{activeFinding.title}</h4><p>{activeFinding.detail}</p><div className="source-card"><BadgeCheck size={16}/><span><small>TRACEABLE SOURCE</small><b>{activeFinding.source}</b><em>{activeFinding.id==="PF-104"?"PayNest Smart Savings rate: 5% p.a. · Approved fact PF-104":"Rule verified in the fictional PayNest demo rulebook."}</em></span></div><div className="suggestion"><small><Sparkles size={13}/> SUGGESTED NEXT STEP</small><p>{activeFinding.suggestion}</p><div><Btn kind="primary" disabled={busy || resolved.includes(activeFinding.id)} onClick={()=>apply(activeFinding)}><Check size={14}/> Apply suggestion</Btn>{isStaff&&<button className="text-btn" disabled={resolved.includes(activeFinding.id)} onClick={()=>markReviewed(activeFinding)}>Mark reviewed</button>}</div></div></motion.div></AnimatePresence>}<div className="evidence-foot"><LockKeyhole size={12}/> Suggestions never publish automatically</div></aside>}</div>
-
-{isStaff&&<section className="panel decision"><div className="decision-copy"><span><ShieldCheck size={19}/></span><div><b>Human decision required</b><small>Resolve findings, then record a decision. This never publishes content.</small></div></div><div className="decision-actions"><input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Optional reviewer note…"/><Btn kind="reject" onClick={()=>decide("rejected")}><ThumbsDown size={14}/> Reject</Btn><Btn onClick={()=>decide("changes-requested")}><ArrowRight size={14}/> Request changes</Btn><Btn kind="approve" onClick={()=>decide("approved")}><ThumbsUp size={14}/> Approve draft</Btn></div>{decision&&<p className="decision-note"><CheckCheck size={14}/> {decision==="approved"?"Approval saved to the backend:":"Decision recorded in this browser session:"} <b>{decision}</b>.</p>}</section>}</motion.section>}
+{showEvidence&&<aside className="panel evidence"><div className="panel-head"><div><h3>Review findings <span className="count">{open.length}</span></h3><p>{findings.length?`${resolved.length} of ${findings.length} addressed`:"Run a review to see evidence-backed findings."}</p></div><button title="Reverse finding order" aria-label="Reverse finding order" onClick={()=>setFindings(f=>[...f].reverse())}><Filter size={15}/></button></div>{findings.length>0&&<div className="progress"><span>Resolution progress <b>{completion}%</b></span><div><i style={{width:completion+"%"}}/></div></div>}{!findings.length?<div className="empty"><span><ShieldCheck size={29}/><Sparkles size={13}/></span><b>{isStaff?(backendDraftId?"No findings returned for this draft":"Choose a submission to begin") : "Your evidence panel is ready"}</b><p>{isStaff?(backendDraftId?"No findings were returned for this saved submission.":"Open a submitted draft above to inspect its findings."):"Run a review to see each issue, the source rule, and a suggested next step."}</p><small>✓ Approved facts　 ✓ Prohibited phrases　 ✓ Claim evidence</small></div>:<div className="finding-list">{findings.map((f,i)=><motion.button key={f.id} className={`finding ${active===f.id?"selected":""} ${resolved.includes(f.id)?"resolved":""}`} onClick={()=>setActive(f.id)} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:i*.06}}><span className={`finding-icon ${f.severity}`}>{f.severity==="critical"?<ShieldAlert size={16}/>:<Flag size={16}/>}</span><span className="finding-body"><small>{f.type}<b className={f.severity}>{resolved.includes(f.id)?"RESOLVED":f.severity.toUpperCase()}</b></small><strong>{f.title}</strong><em>{f.detail}</em><label><BookOpen size={12}/>{f.source}</label></span><ChevronRight size={14}/></motion.button>)}</div>}
 
 
-{isStaff&&page==="claims"&&<motion.section key="claims" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / FACT MANAGEMENT</div><h1>Claims ledger</h1><p>One source of truth for claims your brand is allowed to make.</p></div>{isStaff&&<Btn kind="primary" onClick={()=>setToast("Approved-fact management is not connected to the Django backend yet.")}><Plus size={15}/> Add approved fact</Btn>}</div><div className="intro-card"><Layers3 size={24}/><span><b>Verified facts, with a history</b><small>Superseded facts stay visible so outdated claims can be identified.</small></span><Pill>3 facts</Pill></div><section className="panel table"><div className="table-head"><b>Approved and historical facts</b><span>FICTIONAL PAYNEST DATA</span></div><div className="table-scroll"><table><thead><tr><th>FACT ID</th><th>FACT / CLAIM</th><th>APPROVED VALUE</th><th>STATUS</th><th>UPDATED</th></tr></thead><tbody>{[["PF-104","Smart Savings interest rate","6.5% p.a.","Approved","01 Oct 2026"],["PF-098","Previous savings rate","6.0% p.a.","Superseded","15 Jun 2026"],["PF-021","Account opening fee","₹0","Approved","12 Aug 2026"]].map(r=><tr key={r[0]}>{r.map((c,i)=><td key={i}>{i===0?<code>{c}</code>:i===1?<b>{c}</b>:i===3?<Pill tone={c==="Approved"?"good":""}>{c}</Pill>:c}</td>)}</tr>)}</tbody></table></div><p className="table-foot">Only approved facts are current references. Historical facts remain visible for traceability.</p></section></motion.section>}
+{activeFinding&&<AnimatePresence mode="wait"><motion.div key={activeFinding.id} className="evidence-detail" initial={{opacity:0,y:7}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="detail-kicker"><BookOpen size={13}/> EVIDENCE & EXPLANATION <b className={activeFinding.severity}>{activeFinding.severity.toUpperCase()}</b></div><h4>{activeFinding.title}</h4><p>{activeFinding.detail}</p><div className="source-card"><BadgeCheck size={16}/><span><small>TRACEABLE SOURCE</small><b>{activeFinding.source}</b><em>{activeFinding.kind==="fact_mismatch"?"Approved fact returned by the backend: "+activeFinding.source:"Rule source returned by the backend: "+activeFinding.source}</em></span></div><div className="suggestion"><small><Sparkles size={13}/> SUGGESTED NEXT STEP</small><p>{activeFinding.suggestion}</p>{!isStaff&&<div><Btn kind="primary" disabled={busy || resolved.includes(activeFinding.id) || !isUsableSuggestion(activeFinding.suggestion)} onClick={()=>apply(activeFinding)}><Check size={14}/> Apply suggestion</Btn></div>}</div></motion.div></AnimatePresence>}<div className="evidence-foot"><LockKeyhole size={12}/> Suggestions never publish automatically</div></aside>}</div>
 
-{page==="guidelines"&&<motion.section key="guidelines" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / RULEBOOK</div><h1>Brand guidelines</h1><p>Versioned rules that explain what good looks like.</p></div>{isStaff&&<Btn kind="primary" onClick={()=>setToast("Guideline editing is not connected to the Django backend yet.")}><Plus size={15}/> Add guideline</Btn>}</div><div className="guides">{[{icon:ShieldAlert,title:"Prohibited claims",desc:"Avoid absolute promises or misleading financial outcomes.",items:["guaranteed","risk-free","100% safe"],tone:"red"},{icon:BookOpen,title:"Verified product facts",desc:"Use current facts and check effective dates.",items:["Interest rate: 6.5% p.a.","Account opening fee: ₹0","Check superseded facts"],tone:"green"},{icon:Sparkles,title:"Brand voice",desc:"Clear, supportive, transparent, and never misleading.",items:["Plain language","No pressure tactics","Explain product limits"],tone:"purple"},{icon:CheckCheck,title:"Accessibility & clarity",desc:"Make content readable, inclusive, and easy to understand.",items:["Clear headings","Meaningful link text","Readable contrast"],tone:"blue"}].map(g=><section className="panel guide" key={g.title}><span className={`guide-icon ${g.tone}`}><g.icon size={19}/></span><h3>{g.title}</h3><p>{g.desc}</p>{g.items.map(i=><small key={i}><Check size={12}/>{i}</small>)}<button className="text-btn" onClick={()=>setToast(`${g.title}: demo guideline details opened.`)}>View guideline <ArrowRight size={13}/></button></section>)}</div><p className="disclaimer"><Shield size={14}/> Fictional demo rules. Confirm policies with the actual brand owner before use.</p></motion.section>}
+{isStaff&&backendDraftId&&<section className="panel decision"><div className="decision-copy"><span><ShieldCheck size={19}/></span><div><b>Reviewer decision</b><small>Leave a clear comment, then approve, reject, or request changes. The creator owns the text edits.</small></div></div><div className="decision-actions"><input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Reviewer comment (required for reject or request changes)…"/><Btn kind="reject" disabled={status==="Approved"} onClick={()=>decide("rejected")}><ThumbsDown size={14}/> Reject</Btn><Btn disabled={status==="Approved"} onClick={()=>decide("changes-requested")}><ArrowRight size={14}/> Request changes</Btn><Btn kind="approve" disabled={status==="Approved"} onClick={()=>decide("approved")}><ThumbsUp size={14}/> Approve draft</Btn></div>{decision&&<p className="decision-note"><CheckCheck size={14}/> Reviewer decision saved to the backend: <b>{decision.replaceAll("-"," ")}</b>.</p>}</section>}</motion.section>}
 
-{isStaff&&page==="insights"&&<motion.section key="insights" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / CONTINUOUS IMPROVEMENT</div><h1>Guideline insights</h1><p>Recurring overrides may reveal where a rule needs more clarity.</p></div><Btn onClick={()=>setToast("Illustrative insight report prepared.")}><Activity size={15}/> Export insights</Btn></div><div className="insight-hero"><span><Lightbulb size={15}/> GUIDELINE GAP DETECTED</span><h2>Good guidelines should reduce<br/>repeat questions.</h2><p>Eight reviewer overrides mention promotional claims this month. That may signal ambiguity in the rule—not just creator error.</p><Btn kind="primary" onClick={()=>setToast("Guideline review flagged in this demo session.")}>Flag for guideline review <ArrowRight size={14}/></Btn><div className="big-number">8<small>overrides</small></div></div><div className="section-head"><div><h2>Patterns worth a closer look</h2><p>Illustrative data from the fictional PayNest workspace.</p></div><Pill>Last 30 days</Pill></div><div className="insight-cards">{[{n:"01",title:"Promotional claims",count:"8 overrides",desc:"Reviewers frequently allow wording the current guidance appears to prohibit."},{n:"02",title:"Outdated product rates",count:"6 findings",desc:"Older rate references still appear in campaign drafts."},{n:"03",title:"Risk language",count:"4 repeated flags",desc:"Approved alternatives could help reviewers and creators."}].map(x=><section className="panel insight-card" key={x.n}><code>{x.n}</code><small>{x.count}</small><h3>{x.title}</h3><p>{x.desc}</p><button className="text-btn" onClick={()=>setToast("Insight added to demo follow-up.")}>Investigate pattern <ArrowRight size={13}/></button></section>)}</div><p className="disclaimer"><Lightbulb size={14}/> Production insights must be calculated from recorded findings and reviewer overrides.</p></motion.section>}
 
-{isStaff&&page==="audit"&&<motion.section key="audit" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / ACCOUNTABILITY</div><h1>Audit trail</h1><p>A readable timeline of what changed, who reviewed it, and why.</p></div><Btn onClick={()=>setToast("Audit export requires a connected backend.")}><History size={15}/> Export history</Btn></div><div className="intro-card"><History size={24}/><span><b>Traceable by design</b><small>Backend audit events should be append-only. This view shows local session activity.</small></span><Pill tone="warn">Demo session</Pill></div><section className="panel audit"><div className="panel-head"><div><h3>Recent activity</h3><p>Latest actions in this browser session</p></div><Pill>Local demo</Pill></div>{[{name:"Workspace opened",desc:"PayNest demo workspace loaded.",time:"Just now · System"},...versions.slice(1).reverse().map(v=>({name:v.name+" saved",desc:"Draft version saved in local session history.",time:v.time+" · Jaiveer Singh"})),...(decision?[{name:"Draft "+decision,desc:comment||"No reviewer comment added.",time:"Current session · Jaiveer Singh"}]:[])].map((x,i)=><div className="audit-row" key={i}><span><History size={15}/></span><div><b>{x.name}</b><p>{x.desc}</p><small>{x.time}</small></div><code>{i===0?"SESSION":x.name.includes("saved")?"VERSION":"DECISION"}</code></div>)}</section></motion.section>}
+{page==="claims"&&<motion.section key="claims" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> REFERENCE / APPROVED FACTS</div><h1>Claims ledger</h1><p>Approved and historical product facts loaded from the Django knowledge API.</p></div><Btn onClick={()=>{setKnowledgeLoading(true);api.knowledge().then(data=>setKnowledgeData({facts:Array.isArray(data?.facts)?data.facts:[],rules:Array.isArray(data?.rules)?data.rules:[]})).catch(error=>setKnowledgeError(error.message||"Could not load brand knowledge.")).finally(()=>setKnowledgeLoading(false));}} disabled={knowledgeLoading}><RefreshCw size={14}/> Refresh facts</Btn></div><div className="intro-card"><Layers3 size={24}/><span><b>Verified facts, with a history</b><small>Only approved facts are used by the review engine. Superseded facts remain visible for traceability.</small></span><Pill>{knowledgeData.facts.length} facts</Pill></div>{knowledgeError&&<p className="disclaimer"><AlertTriangle size={14}/>{knowledgeError}</p>}<section className="panel table"><div className="table-head"><b>Approved and historical facts</b><span>{knowledgeLoading?"LOADING…":"LIVE BACKEND DATA"}</span></div><div className="table-scroll"><table><thead><tr><th>FACT</th><th>APPROVED VALUE</th><th>STATUS</th><th>EFFECTIVE DATE</th><th>SOURCE</th></tr></thead><tbody>{knowledgeData.facts.map(fact=><tr key={fact.id}><td><b>{fact.key}</b></td><td>{fact.value}</td><td><Pill tone={fact.status==="approved"?"good":""}>{fact.status}</Pill></td><td>{fact.effective_date||"—"}</td><td>{fact.source||"—"}</td></tr>)}</tbody></table></div>{!knowledgeLoading&&!knowledgeData.facts.length&&<p className="table-foot">No facts were returned by the backend. Run <code>python manage.py seed_demo</code> to load the fictional PayNest demo facts.</p>}<p className="table-foot">Fact editing is intentionally not offered in this view; manage approved knowledge through the authenticated Django admin until an audited editor is implemented.</p></section></motion.section>}
+
+{page==="guidelines"&&<motion.section key="guidelines" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / RULEBOOK</div><h1>Brand guidelines</h1><p>Rules and prohibited phrases loaded from the backend rulebook.</p></div><Btn onClick={()=>{setKnowledgeLoading(true);api.knowledge().then(data=>setKnowledgeData({facts:Array.isArray(data?.facts)?data.facts:[],rules:Array.isArray(data?.rules)?data.rules:[]})).catch(error=>setKnowledgeError(error.message||"Could not load brand knowledge.")).finally(()=>setKnowledgeLoading(false));}} disabled={knowledgeLoading}><RefreshCw size={14}/> Refresh rules</Btn></div>{knowledgeError&&<p className="disclaimer"><AlertTriangle size={14}/>{knowledgeError}</p>}<div className="guides">{knowledgeData.rules.map(rule=><section className="panel guide" key={rule.id}><span className="guide-icon red"><ShieldAlert size={19}/></span><h3>{rule.code}: {rule.phrase}</h3><p>{rule.explanation}</p><small><BookOpen size={12}/>{rule.source||"Brand style guide"}</small><small><Check size={12}/>{rule.replacement?`Suggested replacement: ${rule.replacement}`:"Human review required; no automatic replacement is configured."}</small></section>)}</div>{!knowledgeLoading&&!knowledgeData.rules.length&&<section className="panel empty"><b>No rules loaded</b><p>Run <code>python manage.py seed_demo</code> to load the fictional PayNest rulebook.</p></section>}<p className="disclaimer"><Shield size={14}/> Review rules are read-only here. Automatic replacements are shown only when the backend has configured safe replacement copy.</p></motion.section>}
+
+{isStaff&&page==="insights"&&<motion.section key="insights" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / CONTINUOUS IMPROVEMENT</div><h1>Guideline insights</h1><p>Patterns calculated from persisted findings and reviewer decisions across accessible drafts.</p></div><Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}><RefreshCw size={14}/> Refresh metrics</Btn></div><div className="insight-hero"><span><Activity size={15}/> LIVE WORKSPACE METRICS</span><h2>{allFindings.length ? "Review patterns, grounded in real activity." : "Your review data will appear here."}</h2><p>{allFindings.length ? `${allFindings.length} finding records across ${savedDrafts.length} accessible drafts. ${allDecisions.filter(item=>item.action==="dismissed").length} findings have been dismissed by a reviewer.` : "Run a backend review and record reviewer decisions to populate these metrics. No illustrative counts are shown."}</p><div className="big-number">{allFindings.filter(item=>item.state==="open"||item.state==="acknowledged").length}<small>open / acknowledged</small></div></div><div className="section-head"><div><h2>Most frequent finding types</h2><p>Counts exclude obsolete findings from older versions.</p></div><Pill>{allFindings.length} findings</Pill></div><div className="insight-cards">{topFindingPatterns.map(([kind,count],i)=><section className="panel insight-card" key={kind}><code>{String(i+1).padStart(2,"0")}</code><small>{count} occurrence{count===1?"":"s"}</small><h3>{kind.replaceAll("_"," ")}</h3><p>{allFindings.filter(item=>item.kind===kind&&(item.state==="open"||item.state==="acknowledged")).length} currently unresolved; {allFindings.filter(item=>item.kind===kind&&item.state==="dismissed").length} dismissed by reviewers.</p></section>)}</div>{!topFindingPatterns.length&&<section className="panel empty"><b>No findings recorded yet</b><p>Once drafts have been reviewed, recurring issues will be calculated from the saved records.</p></section>}<div className="section-head"><div><h2>Review outcomes</h2><p>Persisted reviewer decisions, not browser-session events.</p></div></div><div className="stats">{[{label:"Approved",count:allDecisions.filter(item=>item.action==="approved").length},{label:"Changes requested",count:allDecisions.filter(item=>item.action==="changes_requested").length},{label:"Rejected",count:allDecisions.filter(item=>item.action==="rejected").length},{label:"Dismissed findings",count:allDecisions.filter(item=>item.action==="dismissed").length}].map(metric=><div className="stat" key={metric.label}><div className="stat-label">{metric.label}</div><strong>{metric.count}</strong><small>Recorded in backend</small></div>)}</div><p className="disclaimer"><Lightbulb size={14}/> These metrics describe the drafts available to your account; they are not a complete organization-wide report unless the reviewer account can access all relevant drafts.</p></motion.section>}
+
+{isStaff&&page==="audit"&&<motion.section key="audit" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / ACCOUNTABILITY</div><h1>Audit trail</h1><p>Persisted version and decision events returned by Django.</p></div><Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}><RefreshCw size={14}/> Refresh history</Btn></div><div className="intro-card"><History size={24}/><span><b>Traceable by design</b><small>Events below come from stored draft versions and reviewer decisions.</small></span><Pill>{auditEvents.length} events</Pill></div><section className="panel audit"><div className="panel-head"><div><h3>Recent activity</h3><p>Newest persisted events first</p></div><Pill>Backend history</Pill></div>{auditEvents.slice(0,100).map((event,index)=><div className="audit-row" key={`${event.eventType}-${event.id}-${event.created_at||index}`}><span><History size={15}/></span><div><b>{event.eventType==="version"?`Version ${event.version} saved`:event.action.replaceAll("_"," ")}</b><p>{event.draftTitle||`Draft ${event.draftId}`} · {event.comment||"No reviewer comment recorded."}</p><small>{event.actor_name||"Unknown actor"} · {event.created_at?new Date(event.created_at).toLocaleString():"Time unavailable"}</small></div><code>{event.eventType==="version"?"VERSION":"DECISION"}</code></div>)}{!auditEvents.length&&<div className="empty"><span><History size={29}/></span><b>No audit events yet</b><p>Save a draft revision or record a reviewer decision to create persistent history.</p></div>}</section></motion.section>}
 
 </AnimatePresence></div></main>
 

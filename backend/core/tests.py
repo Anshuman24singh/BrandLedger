@@ -337,6 +337,106 @@ class WorkflowTests(TestCase):
                 for decision in data["decisions"]
             )
         )
+    def test_revision_obsoletes_acknowledged_findings_from_previous_version(self):
+        draft = self.create_draft("Returns guaranteed.")
+        finding = draft["findings"][0]
+        acknowledged = self.decide_finding(
+            draft["id"], finding["id"], "acknowledged", "Reviewed old version"
+        )
+        self.assertEqual(acknowledged.status_code, 200)
+
+        self.client.force_authenticate(user=self.creator)
+        revised = self.client.post(
+            f"/api/drafts/{draft['id']}/revise/",
+            {"content": "A clear product announcement."},
+            format="json",
+        )
+        self.assertEqual(revised.status_code, 200)
+        self.assertTrue(revised.json()["findings"])
+        self.assertEqual(revised.json()["findings"][0]["state"], "obsolete")
+
+        approved = self.approve_draft(draft["id"])
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], "approved")
+
+    def test_revision_obsoletes_previously_dismissed_findings(self):
+        draft = self.create_draft("Returns guaranteed.")
+        finding = draft["findings"][0]
+        self.decide_finding(draft["id"], finding["id"], "dismissed", "Reviewed and accepted for this version")
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.post(
+            f"/api/drafts/{draft['id']}/revise/",
+            {"content": "A simple product announcement."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Finding.objects.get(pk=finding["id"]).state, "obsolete")
+        self.assertTrue(
+            Decision.objects.filter(
+                draft_id=draft["id"], finding_id=finding["id"], action="dismissed"
+            ).exists()
+        )
+
+    def test_dismissal_requires_a_documented_reason(self):
+        draft = self.create_draft("Returns guaranteed.")
+        finding = draft["findings"][0]
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post(
+            f"/api/drafts/{draft['id']}/findings/{finding['id']}/decide/",
+            {"action": "dismissed", "comment": "   "},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Finding.objects.get(pk=finding["id"]).state, "open")
+
+    def test_draft_request_changes_is_persisted(self):
+        draft = self.create_draft("A simple product announcement.")
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post(
+            f"/api/drafts/{draft['id']}/decide/",
+            {"action": "changes_requested", "comment": "Please clarify the claim."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "changes_requested")
+        self.assertTrue(
+            Decision.objects.filter(
+                draft_id=draft["id"], action="changes_requested",
+                comment="Please clarify the claim.", actor=self.reviewer,
+            ).exists()
+        )
+
+    def test_non_staff_cannot_record_draft_level_decision(self):
+        draft = self.create_draft("A simple product announcement.")
+        response = self.client.post(
+            f"/api/drafts/{draft['id']}/decide/",
+            {"action": "rejected", "comment": "Not suitable."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_approved_draft_cannot_be_revised(self):
+        draft = self.create_draft("A simple product announcement.")
+        self.assertEqual(self.approve_draft(draft["id"]).status_code, 200)
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.post(
+            f"/api/drafts/{draft['id']}/revise/",
+            {"content": "Changed after approval."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_knowledge_endpoint_includes_historical_facts_and_rules(self):
+        Fact.objects.create(
+            key="old savings rate", value="6.0%", source="F-009", status="superseded"
+        )
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.get("/api/knowledge/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({fact["status"] for fact in response.json()["facts"]}, {"approved", "superseded"})
+        self.assertTrue(response.json()["rules"])
+
+
 class AIResponseValidationTests(TestCase):
     def setUp(self):
         self.fact = Fact.objects.create(

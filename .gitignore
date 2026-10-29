@@ -28,3 +28,6 @@ dist/
 # Django generated files
 staticfiles/
 **/staticfiles/
+
+
+REPAIR_NOTES.md

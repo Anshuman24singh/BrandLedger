@@ -73,6 +73,7 @@ The frontend communicates with the Django backend through REST API endpoints. Th
 | `DELETE` | `/api/drafts/{id}/` | Delete a draft |
 | `POST` | `/api/drafts/{id}/revise/` | Revise a draft |
 | `POST` | `/api/drafts/{id}/findings/{finding_id}/decide/` | Record a reviewer decision |
+| `POST` | `/api/drafts/{id}/decide/` | Persist reviewer request-changes or rejection decisions |
 | `POST` | `/api/drafts/{id}/approve/` | Approve a draft when requirements are satisfied |
 
 ## 💻 Run Locally
@@ -96,6 +97,8 @@ cd BrandLedger
 cd backend
 python -m venv .venv
 ```
+
+Copy `.env.example` to `.env` and set a valid `DATABASE_URL`, demo passwords, and `GROQ_API_KEY` if you want AI-assisted review. The demo passwords in the example match the public judge login panel; change both together if you use different credentials.
 
 Activate the environment.
 
@@ -159,8 +162,10 @@ Use this variable name if the Django code reads `GROQ_API_KEY`. Store the real k
 The configured Render start command is:
 
 ```bash
-python manage.py migrate --noinput && gunicorn config.wsgi:application
+python manage.py migrate --noinput && python manage.py seed_demo && gunicorn config.wsgi:application
 ```
+
+Set `DEMO_CREATOR_PASSWORD` and `DEMO_REVIEWER_PASSWORD` to values of at least 12 characters in the backend environment. For the public judge demo, these values must match the credentials displayed on the login screen. For a private deployment, change the frontend display and backend environment together, or remove the demo-credential panel. Never commit `.env` files or real API keys.
 
 ### Vercel — Frontend
 
@@ -184,6 +189,10 @@ Redeploy the frontend after changing environment variables.
 - Context-aware AI claim analysis with explanations and safer rewrite suggestions.
 - Evidence-grounded retrieval of approved brand facts and policy references.
 - Governance analytics for review outcomes, recurring risks, and approval history.
+
+## 🧪 Automated Checks
+
+GitHub Actions runs `python manage.py check`, the Django test suite, and `npm run build` on pushes and pull requests. The workflow uses SQLite for isolated backend tests and does not require a live Groq API key.
 
 ## 📄 License
 

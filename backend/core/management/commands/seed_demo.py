@@ -52,7 +52,9 @@ class Command(BaseCommand):
             code="R-12",
             defaults={
                 "phrase": "guaranteed",
-                "replacement": "subject to applicable terms",
+                # No phrase-only replacement is safe in every sentence.
+                # Blank intentionally forces human review instead of a bad rewrite.
+                "replacement": "",
                 "explanation": (
                     "Absolute guarantees are prohibited in this fictional brand guide."
                 ),
@@ -63,7 +65,7 @@ class Command(BaseCommand):
             code="R-13",
             defaults={
                 "phrase": "risk-free",
-                "replacement": "review product risks and terms",
+                "replacement": "",
                 "explanation": "Risk-free wording is not permitted.",
                 "source": "PayNest Brand Guide, section 4",
             },

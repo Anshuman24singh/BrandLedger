@@ -44,9 +44,14 @@ def logout(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def knowledge(request):
-    facts = Fact.objects.filter(status="approved")
-    rules = Rule.objects.all()
-    return Response({"facts": FactSerializer(facts, many=True).data, "rules": RuleSerializer(rules, many=True).data})
+    # Reviewers need historical facts as well as currently approved facts;
+    # the review engine itself continues to use approved facts only.
+    facts = Fact.objects.all().order_by("key")
+    rules = Rule.objects.all().order_by("code")
+    return Response({
+        "facts": FactSerializer(facts, many=True).data,
+        "rules": RuleSerializer(rules, many=True).data,
+    })
 
 
 @api_view(["GET", "POST"])
@@ -107,6 +112,12 @@ def revise(request, pk):
     draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
     if draft.author_id != request.user.id and not request.user.is_staff:
         return Response({"error": "Only author or staff can revise"}, status=status.HTTP_403_FORBIDDEN)
+    if draft.status == "approved":
+        return Response(
+            {"error": "Approved drafts are immutable. Create a new draft to make further changes."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     content = str(request.data.get("content", "")).strip()
     if not content or len(content) > 20000:
         return Response({"error": "Content required (max 20,000 characters)"}, status=status.HTTP_400_BAD_REQUEST)
@@ -130,7 +141,9 @@ def revise(request, pk):
         draft.content = content
         draft.status = "in_review"
         draft.save(update_fields=["content", "status", "updated_at"])
-        draft.findings.filter(state="open").update(state="obsolete")
+        # Every finding from the previous version is historical now. Keep the
+        # reviewer decision in Decision, and do not show old findings as current.
+        draft.findings.exclude(state="obsolete").update(state="obsolete")
         for finding in findings:
             Finding.objects.create(draft=draft, version=version, **finding)
         Decision.objects.create(draft=draft, actor=request.user, action="revised", comment=f"Created version {version_number}")
@@ -149,7 +162,12 @@ def decide(request, pk, finding_id):
     action = request.data.get("action")
     if action not in ["acknowledged", "dismissed"]:
         return Response({"error": "Choose acknowledged or dismissed"}, status=status.HTTP_400_BAD_REQUEST)
-    comment = str(request.data.get("comment", ""))[:1000]
+    comment = str(request.data.get("comment", "")).strip()[:1000]
+    if action == "dismissed" and not comment:
+        return Response(
+            {"error": "Add a short reviewer reason before dismissing a finding."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     with transaction.atomic():
         finding.state = action
         finding.save(update_fields=["state"])
@@ -159,10 +177,53 @@ def decide(request, pk, finding_id):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def draft_decide(request, pk):
+    """Persist a reviewer-level request-changes or rejection decision."""
+    if not request.user.is_staff:
+        return Response({"error": "Reviewer permission required"}, status=status.HTTP_403_FORBIDDEN)
+
+    draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+    if draft.status == "approved":
+        return Response(
+            {"error": "Approved drafts are immutable. Create a new draft for further review."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    action = request.data.get("action")
+    if action not in ["rejected", "changes_requested"]:
+        return Response(
+            {"error": "Choose rejected or changes_requested"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    comment = str(request.data.get("comment", "")).strip()[:1000]
+    if not comment:
+        return Response(
+            {"error": "A reviewer comment is required for this decision."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        draft.status = action
+        draft.save(update_fields=["status", "updated_at"])
+        Decision.objects.create(
+            draft=draft,
+            actor=request.user,
+            action=action,
+            comment=comment,
+        )
+
+    return Response(DraftSerializer(draft).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def approve(request, pk):
     if not request.user.is_staff:
         return Response({"error": "Reviewer permission required"}, status=status.HTTP_403_FORBIDDEN)
     draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+    if draft.status == "approved":
+        return Response({"error": "This draft has already been approved and is immutable."}, status=status.HTTP_400_BAD_REQUEST)
     unresolved_states = ["open", "acknowledged"]
     if draft.findings.filter(state__in=unresolved_states).exists():
         return Response({"error": "Resolve all open or acknowledged findings before approval. Revise the draft or dismiss the finding with a documented reason."}, status=status.HTTP_400_BAD_REQUEST)

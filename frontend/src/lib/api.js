@@ -6,7 +6,7 @@ const BASE_URL = (
 const TOKEN_KEY = "brandledger_token";
 
 function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 async function request(path, options = {}) {
@@ -57,9 +57,9 @@ export const api = {
       );
     }
 
-    localStorage.setItem(TOKEN_KEY, data.token);
-    localStorage.setItem("bl-username", data.username || username);
-    localStorage.setItem(
+    sessionStorage.setItem(TOKEN_KEY, data.token);
+    sessionStorage.setItem("bl-username", data.username || username);
+    sessionStorage.setItem(
       "bl-is-staff",
       String(Boolean(data.is_staff))
     );
@@ -71,9 +71,9 @@ export const api = {
     try {
       await request("/logout/", { method: "POST" });
     } finally {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem("bl-username");
-      localStorage.removeItem("bl-is-staff");
+      sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem("bl-username");
+      sessionStorage.removeItem("bl-is-staff");
     }
   },
 
@@ -109,6 +109,16 @@ export const api = {
   decide(draftId, findingId, action, comment = "") {
     return request(
       `/drafts/${encodeURIComponent(draftId)}/findings/${encodeURIComponent(findingId)}/decide/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action, comment }),
+      }
+    );
+  },
+
+  draftDecision(draftId, action, comment = "") {
+    return request(
+      `/drafts/${encodeURIComponent(draftId)}/decide/`,
       {
         method: "POST",
         body: JSON.stringify({ action, comment }),
