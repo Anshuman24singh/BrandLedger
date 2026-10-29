@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
 from .models import Fact, Rule, Draft, Version, Finding, Decision
+from .engine import deterministic_inspect
 
 
 class WorkflowTests(TestCase):
@@ -38,6 +39,15 @@ class WorkflowTests(TestCase):
 
         self.client = APIClient()
         self.client.force_authenticate(user=self.creator)
+
+        # Workflow tests should not depend on a live Groq API key or network.
+        # Keep deterministic rule/fact checks active while isolating AI behavior.
+        self.ai_inspect_patcher = patch(
+            "core.views.inspect",
+            side_effect=lambda content, brand_id=None: deterministic_inspect(content),
+        )
+        self.ai_inspect_patcher.start()
+        self.addCleanup(self.ai_inspect_patcher.stop)
 
     def create_draft(self, content):
         response = self.client.post(
@@ -108,6 +118,17 @@ class WorkflowTests(TestCase):
         response = self.approve_draft(draft["id"])
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "approved")
+
+    def test_incomplete_ai_review_blocks_approval(self):
+        draft_data = self.create_draft("A simple product announcement.")
+        draft = Draft.objects.get(pk=draft_data["id"])
+        draft.ai_review_complete = False
+        draft.save(update_fields=["ai_review_complete"])
+
+        response = self.approve_draft(draft.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("AI review is incomplete", response.json()["error"])
 
     def test_review_and_approval(self):
         draft = self.create_draft(
