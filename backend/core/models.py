@@ -35,6 +35,7 @@ class Draft(models.Model):
  content=models.TextField()
  author=models.ForeignKey(User,on_delete=models.PROTECT,related_name='drafts')
  status=models.CharField(max_length=30,default='in_review')
+ ai_review_complete=models.BooleanField(default=True)
  created_at=models.DateTimeField(auto_now_add=True)
  updated_at=models.DateTimeField(auto_now=True)
 class Version(models.Model):

@@ -13,7 +13,7 @@ from rest_framework.response import Response
 
 from .models import Brand, Fact, Rule, Draft, Version, Finding, Decision
 from .serializers import BrandSerializer, FactSerializer, RuleSerializer, DraftSerializer
-from .engine import AIReviewError, inspect
+from .engine import AIReviewError, deterministic_inspect, inspect
 
 
 def accessible_drafts(user):
@@ -81,21 +81,23 @@ def drafts(request):
     if not title or not content or len(content) > 20000:
         return Response({"error": "Title and content (max 20,000 characters) required"}, status=status.HTTP_400_BAD_REQUEST)
 
+    ai_review_complete = True
     try:
         findings = inspect(content, brand.id if brand else None)
     except AIReviewError:
-        return Response(
-            {
-                "error": (
-                    "AI review is temporarily unavailable. "
-                    "Your draft was not saved. Please try again."
-                )
-            },
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
+        # Preserve deterministic rule/fact checks and save the creator's work.
+        # Approval remains blocked until a successful AI-reviewed revision.
+        findings = deterministic_inspect(content)
+        ai_review_complete = False
 
     with transaction.atomic():
-        draft = Draft.objects.create(title=title, content=content, author=request.user, brand=brand)
+        draft = Draft.objects.create(
+            title=title,
+            content=content,
+            author=request.user,
+            brand=brand,
+            ai_review_complete=ai_review_complete,
+        )
         version = Version.objects.create(draft=draft, content=content, version=1, editor=request.user)
         for finding in findings:
             Finding.objects.create(draft=draft, version=version, **finding)
@@ -110,8 +112,10 @@ def draft_detail(request, pk):
     if request.method == "GET":
         return Response(DraftSerializer(draft).data)
 
-    if draft.author_id != request.user.id and not request.user.is_staff:
-        return Response({"error": "Only the author or staff can delete this draft."}, status=status.HTTP_403_FORBIDDEN)
+    # Staff may review every draft, but editing/deleting is an author action.
+    # Enforce this here rather than relying on the frontend's read-only UI.
+    if draft.author_id != request.user.id:
+        return Response({"error": "Only the draft author can delete this draft."}, status=status.HTTP_403_FORBIDDEN)
     if draft.status == "approved":
         return Response({"error": "Approved drafts are protected to preserve compliance history. Archive support can be added separately."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -125,8 +129,9 @@ def draft_detail(request, pk):
 @permission_classes([IsAuthenticated])
 def revise(request, pk):
     draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
-    if draft.author_id != request.user.id and not request.user.is_staff and not draft.author.is_staff:
-        return Response({"error": "You can revise only your own drafts or drafts submitted by a client Reviewer."}, status=status.HTTP_403_FORBIDDEN)
+    # Reviewers can make review decisions, but cannot edit another user's draft.
+    if draft.author_id != request.user.id:
+        return Response({"error": "Only the draft author can revise this draft."}, status=status.HTTP_403_FORBIDDEN)
     if draft.status == "approved":
         return Response(
             {"error": "Approved drafts are immutable. Create a new draft to make further changes."},
@@ -137,25 +142,21 @@ def revise(request, pk):
     if not content or len(content) > 20000:
         return Response({"error": "Content required (max 20,000 characters)"}, status=status.HTTP_400_BAD_REQUEST)
 
+    ai_review_complete = True
     try:
         findings = inspect(content, draft.brand_id)
     except AIReviewError:
-        return Response(
-            {
-                "error": (
-                    "AI review is temporarily unavailable. "
-                    "Your draft was not revised. Please try again."
-                )
-            },
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
+        # Save the requested revision, but mark the review as incomplete.
+        findings = deterministic_inspect(content)
+        ai_review_complete = False
 
     with transaction.atomic():
         version_number = draft.versions.count() + 1
         version = Version.objects.create(draft=draft, content=content, version=version_number, editor=request.user)
         draft.content = content
         draft.status = "in_review"
-        draft.save(update_fields=["content", "status", "updated_at"])
+        draft.ai_review_complete = ai_review_complete
+        draft.save(update_fields=["content", "status", "ai_review_complete", "updated_at"])
         # Every finding from the previous version is historical now. Keep the
         # reviewer decision in Decision, and do not show old findings as current.
         draft.findings.exclude(state="obsolete").update(state="obsolete")
@@ -262,6 +263,11 @@ def approve(request, pk):
     draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
     if draft.status == "approved":
         return Response({"error": "This draft has already been approved and is immutable."}, status=status.HTTP_400_BAD_REQUEST)
+    if not draft.ai_review_complete:
+        return Response(
+            {"error": "AI review is incomplete because the AI service was unavailable. Revise the draft after service recovery before approval."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     unresolved_states = ["open", "acknowledged"]
     if draft.findings.filter(state__in=unresolved_states).exists():
         return Response({"error": "Resolve all open or acknowledged findings before approval. Revise the draft or dismiss the finding with a documented reason."}, status=status.HTTP_400_BAD_REQUEST)

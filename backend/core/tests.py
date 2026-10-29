@@ -1,6 +1,7 @@
 import json
 import os
 from unittest.mock import patch
+
 from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
@@ -10,13 +11,6 @@ from .models import Fact, Rule, Draft, Version, Finding, Decision
 
 class WorkflowTests(TestCase):
     def setUp(self):
-        self.groq_patcher = patch(
-            "core.engine.groq_inspect",
-            return_value=[],
-        )
-        self.groq_patcher.start()
-        self.addCleanup(self.groq_patcher.stop)
-
         self.creator = User.objects.create_user(
             "creator",
             password="test123",
@@ -202,7 +196,7 @@ class WorkflowTests(TestCase):
             f"/api/drafts/{draft['id']}/"
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 403)
         self.assertTrue(
             Draft.objects.filter(pk=draft["id"]).exists()
         )
