@@ -1,4 +1,4 @@
-import React,{useState,useEffect}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
+import React,{useState,useEffect,useRef}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
 
 const seed="Introducing PayNest Smart Savings. Our savings rate is 7%. Returns are guaranteed and risk-free. Please review the current approved rate and product terms before publication.";
 
@@ -77,39 +77,59 @@ function mapBackendFindings(items){
     });
 }
 
-function NotificationMenu({isStaff,open,setOpen,notifications,unreadCount,readIds,onMarkAllRead,onOpenNotification,onRefresh}){
-  return <div style={{position:"relative"}}>
+function NotificationMenu({isStaff,open,setOpen,notifications,unreadCount,readIds,onMarkAllRead,onOpenNotification,onRefresh,rootRef}){
+  return <div ref={rootRef} style={{position:"relative"}}>
     <button className="icon-btn" title="Notifications" aria-label={`Notifications${unreadCount?`, ${unreadCount} unread`:""}`} aria-expanded={open} onClick={()=>{setOpen(v=>!v);if(!open)onRefresh();}} style={{position:"relative"}}>
       <Bell size={17}/>{unreadCount>0&&<span style={{position:"absolute",right:"-3px",top:"-4px",minWidth:"16px",height:"16px",padding:"0 3px",display:"grid",placeItems:"center",borderRadius:"99px",background:"#e87989",color:"#1b1014",fontSize:"9px",fontWeight:900,border:"2px solid var(--panel, #171c27)"}}>{unreadCount>9?"9+":unreadCount}</span>}
     </button>
-    {open&&<>
-      <button aria-label="Close notifications" onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,zIndex:85,border:0,background:"transparent"}}/>
-      <section role="dialog" aria-label="Notifications" style={{position:"absolute",right:0,top:"calc(100% + 10px)",zIndex:90,width:"min(360px, calc(100vw - 32px))",maxHeight:"min(460px, 70vh)",overflowY:"auto",padding:"12px",border:"1px solid var(--border, #30394b)",borderRadius:"14px",background:"var(--panel, #171c27)",boxShadow:"0 20px 50px rgba(0,0,0,.38)",color:"inherit"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",marginBottom:"8px"}}>
-          <strong style={{fontSize:"13px"}}>Notifications</strong>
+    {open&&<section role="dialog" aria-label="Notifications" style={{position:"absolute",right:0,top:"calc(100% + 10px)",zIndex:90,width:"min(360px, calc(100vw - 32px))",maxHeight:"min(390px, 70vh)",display:"flex",flexDirection:"column",overflow:"hidden",padding:"12px",border:"1px solid var(--border, #30394b)",borderRadius:"14px",background:"var(--panel, #171c27)",boxShadow:"0 20px 50px rgba(0,0,0,.38)",color:"inherit"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",marginBottom:"8px",flexShrink:0}}>
+          <span><strong style={{fontSize:"13px"}}>Notifications</strong><small style={{display:"block",fontSize:"10px",opacity:.65,marginTop:"3px"}}>{notifications.length} total · scroll for history</small></span>
           <button onClick={onMarkAllRead} disabled={!unreadCount} style={{border:0,background:"transparent",color:"var(--muted, #9da8bd)",fontSize:"10px",cursor:unreadCount?"pointer":"default",opacity:unreadCount?1:.5}}>Mark all read</button>
         </div>
-        {notifications.length===0?<div style={{padding:"18px 8px",textAlign:"center",color:"var(--muted, #9da8bd)",fontSize:"12px"}}><Bell size={20}/><p style={{margin:"8px 0 0"}}>No notifications yet.</p><small>{isStaff?"Drafts waiting for review will appear here.":"Reviewer decisions will appear here."}</small></div>:notifications.slice(0,30).map(note=><button key={note.id} onClick={()=>onOpenNotification(note)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px",marginTop:"5px",border:0,borderRadius:"9px",background:readIds.includes(note.id)?"transparent":"rgba(127,152,232,.10)",color:"inherit",cursor:"pointer"}}>
+        <div style={{overflowY:"auto",minHeight:0,maxHeight:"285px",paddingRight:"3px"}}>
+        {notifications.length===0?<div style={{padding:"18px 8px",textAlign:"center",color:"var(--muted, #9da8bd)",fontSize:"12px"}}><Bell size={20}/><p style={{margin:"8px 0 0"}}>No notifications yet.</p><small>{isStaff?"Drafts waiting for review will appear here.":"Reviewer decisions will appear here."}</small></div>:notifications.map(note=><button key={note.id} onClick={()=>onOpenNotification(note)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px",marginTop:"5px",border:0,borderRadius:"9px",background:readIds.includes(note.id)?"transparent":"rgba(127,152,232,.10)",color:"inherit",cursor:"pointer"}}>
           <span style={{display:"flex",alignItems:"flex-start",gap:"8px"}}><span style={{width:"7px",height:"7px",marginTop:"5px",borderRadius:"50%",background:readIds.includes(note.id)?"transparent":"#9da8ff",flexShrink:0}}/><span style={{minWidth:0,flex:1}}><strong style={{display:"block",fontSize:"12px",lineHeight:1.4}}>{note.title}</strong><span style={{display:"block",fontSize:"11px",lineHeight:1.45,opacity:.82,marginTop:"3px"}}>{note.draftTitle}</span><span style={{display:"block",fontSize:"10px",lineHeight:1.45,opacity:.68,marginTop:"4px"}}>{note.detail}</span><small style={{display:"block",fontSize:"9px",opacity:.55,marginTop:"5px"}}>{note.created_at?new Date(note.created_at).toLocaleString():"Recent"}</small></span></span>
         </button>)}
-      </section>
-    </>}
+        </div>
+      </section>}
   </div>;
 }
 
 export default function App(){
 
 const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=sessionStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>sessionStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>sessionStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>sessionStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false),[notificationOpen,setNotificationOpen]=useState(false),[readNotificationIds,setReadNotificationIds]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`bl-notifications-read:${sessionStorage.getItem("bl-username")||"guest"}:${sessionStorage.getItem("bl-is-staff")==="true"?"reviewer":"creator"}`)||"[]")}catch{return []}});
+const notificationRef=useRef(null),workspaceRef=useRef(null),profileRef=useRef(null),refreshInFlightRef=useRef(false);
 const [knowledgeData,setKnowledgeData]=useState({facts:[],rules:[]});
 const [knowledgeLoading,setKnowledgeLoading]=useState(false);
 const [knowledgeError,setKnowledgeError]=useState("");
+
+useEffect(()=>{
+  function closeTransientPanels(event){
+    if(notificationRef.current && !notificationRef.current.contains(event.target)) setNotificationOpen(false);
+    if(workspaceRef.current && !workspaceRef.current.contains(event.target)) setWorkspaceOpen(false);
+    if(profileRef.current && !profileRef.current.contains(event.target)) setProfileOpen(false);
+  }
+  function closeOnEscape(event){
+    if(event.key==="Escape"){
+      setNotificationOpen(false); setWorkspaceOpen(false); setProfileOpen(false); setSearch(false);
+    }
+  }
+  document.addEventListener("pointerdown",closeTransientPanels);
+  document.addEventListener("keydown",closeOnEscape);
+  return ()=>{
+    document.removeEventListener("pointerdown",closeTransientPanels);
+    document.removeEventListener("keydown",closeOnEscape);
+  };
+},[]);
 
 useEffect(()=>localStorage.setItem("bl-theme",theme),[theme]);
 useEffect(()=>sessionStorage.setItem("bl-page",page),[page]);
 useEffect(()=>{if(toast){let t=setTimeout(()=>setToast(""),3000);return()=>clearTimeout(t)}},[toast]);
 
 async function refreshSavedDrafts(){
-  if(!authenticated) return;
+  if(!authenticated || refreshInFlightRef.current) return;
+  refreshInFlightRef.current=true;
   setLoadingSavedDrafts(true);
   try {
     const response = await api.listDrafts();
@@ -118,9 +138,23 @@ async function refreshSavedDrafts(){
   } catch(error) {
     console.error("Could not load saved drafts:", error);
   } finally {
+    refreshInFlightRef.current=false;
     setLoadingSavedDrafts(false);
   }
 }
+
+useEffect(()=>{
+  if(!authenticated) return;
+  const refreshIfVisible=()=>{ if(document.visibilityState==="visible") refreshSavedDrafts(); };
+  const timer=window.setInterval(refreshIfVisible,4000);
+  window.addEventListener("focus",refreshIfVisible);
+  document.addEventListener("visibilitychange",refreshIfVisible);
+  return ()=>{
+    window.clearInterval(timer);
+    window.removeEventListener("focus",refreshIfVisible);
+    document.removeEventListener("visibilitychange",refreshIfVisible);
+  };
+},[authenticated]);
 
 function toggleDraftSelection(id){
   setSelectedDraftIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
@@ -449,7 +483,7 @@ async function openSavedDraft(id){
     setFindings(list);
     setActive(list[0]?.id || null);
     setResolved(list.filter(f => f.state === "dismissed").map(f => f.id));
-    setStatus(saved.status === "approved" ? "Approved" : saved.status === "rejected" ? "Rejected" : saved.status === "changes_requested" ? "Changes requested" :
+    setStatus(saved.status === "approved" ? "Approved" : saved.status === "rejected" ? "Rejected" : saved.status === "changes_requested" ? "Changes requested" : saved.status === "in_review" ? "Awaiting review" :
       list.some(f => f.state === "open" || f.state === "acknowledged") ? "Changes requested" : "Ready for review");
     setDecision("");
     setPage("reviews");
@@ -473,6 +507,15 @@ function newDraft(){
   setDecision("");
   setPage("reviews");
 }
+
+useEffect(()=>{
+  if(!authenticated || isStaff || backendDraftId==null) return;
+  const current=savedDrafts.find(item=>String(item.id)===String(backendDraftId));
+  if(!current) return;
+  setStatus(current.status === "approved" ? "Approved" : current.status === "rejected" ? "Rejected" : current.status === "changes_requested" ? "Changes requested" : current.status === "in_review" ? "Awaiting review" : "Not reviewed");
+  const latest=latestReviewerDecision(current);
+  if(latest) setDecision(latest.action);
+},[savedDrafts,authenticated,isStaff,backendDraftId]);
 
 const allFindings = savedDrafts.flatMap(item => Array.isArray(item.findings) ? item.findings : []).filter(item => item.state !== "obsolete");
 const allDecisions = savedDrafts.flatMap(item => Array.isArray(item.decisions) ? item.decisions.map(decisionItem => ({...decisionItem,draftTitle:item.title,draftId:item.id})) : []);
@@ -526,6 +569,34 @@ useEffect(() => {
   try { setReadNotificationIds(JSON.parse(sessionStorage.getItem(key) || "[]")); }
   catch { setReadNotificationIds([]); }
 }, [currentUsername, isStaff]);
+
+useEffect(()=>{
+  if(!authenticated || !isStaff || page!=="reviews" || backendDraftId==null) return;
+  let cancelled=false;
+  let detailRequest=false;
+  async function refreshOpenReview(){
+    if(detailRequest || document.visibilityState!=="visible") return;
+    detailRequest=true;
+    try{
+      const saved=await api.getDraft(backendDraftId);
+      if(cancelled) return;
+      setTitle(saved.title || "Untitled campaign draft");
+      setDraft(saved.content || "");
+      const list=mapBackendFindings(saved.findings);
+      setFindings(list);
+      setActive(current=>list.some(item=>item.id===current)?current:(list[0]?.id||null));
+      setResolved(list.filter(item=>item.state==="dismissed").map(item=>item.id));
+      setStatus(saved.status === "approved" ? "Approved" : saved.status === "rejected" ? "Rejected" : saved.status === "changes_requested" ? "Changes requested" : saved.status === "in_review" ? "Awaiting review" : list.some(item=>item.state==="open"||item.state==="acknowledged") ? "Changes requested" : "Ready for review");
+      const latest=latestReviewerDecision(saved);
+      if(latest) setDecision(latest.action);
+    }catch(error){ console.error("Could not refresh the open review:",error); }
+    finally{ detailRequest=false; }
+  }
+  refreshOpenReview();
+  const timer=window.setInterval(refreshOpenReview,4000);
+  window.addEventListener("focus",refreshOpenReview);
+  return ()=>{cancelled=true;window.clearInterval(timer);window.removeEventListener("focus",refreshOpenReview);};
+},[authenticated,isStaff,page,backendDraftId]);
 
 const visibleNav = navigationForRole(isStaff);
 const titlePage=visibleNav.find(n=>n[0]===page)?.[1]||"Overview";
@@ -588,8 +659,8 @@ return <div className={`app theme-${theme}`}>
   <span className="logo-type">BrandLedger<small>BRAND GOVERNANCE</small></span>
   <button className="close-mobile" onClick={e=>{e.stopPropagation();setMobile(false)}}><X size={17}/></button>
 </div>
-<div style={{position:"relative",marginBottom:"4px"}}>
-  <button className="workspace" aria-expanded={workspaceOpen} onClick={()=>setWorkspaceOpen(v=>!v)} style={{width:"100%"}}>
+<div ref={workspaceRef} style={{position:"relative",marginBottom:"4px"}}>
+  <button className="workspace" aria-expanded={workspaceOpen} onClick={()=>{setWorkspaceOpen(v=>!v);setProfileOpen(false);setNotificationOpen(false)}} style={{width:"100%"}}>
     <b style={{display:"grid",placeItems:"center",fontSize:"16px",fontWeight:800,background:"linear-gradient(145deg,#b6c8ff,#7f98e8)",color:"#111827",boxShadow:"0 3px 10px rgba(127,152,232,.25)"}}>P</b>
     <span style={{minWidth:0,flex:1,textAlign:"left"}}><strong>PayNest</strong><small>Selected workspace</small></span>
     <span style={{display:"flex",alignItems:"center",gap:"5px",fontSize:"10px",fontWeight:700,color:"#8ee0b1",whiteSpace:"nowrap"}}><i style={{width:"6px",height:"6px",borderRadius:"50%",background:"#5bd49a",display:"inline-block"}}/> ACTIVE</span>
@@ -618,7 +689,7 @@ return <div className={`app theme-${theme}`}>
 
 {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close navigation"/>}
 
-<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><NotificationMenu isStaff={isStaff} open={notificationOpen} setOpen={setNotificationOpen} notifications={notifications} unreadCount={unreadNotifications.length} readIds={readNotificationIds} onMarkAllRead={markAllNotificationsRead} onOpenNotification={openNotification} onRefresh={refreshSavedDrafts}/><div style={{position:"relative",display:"flex",alignItems:"center"}}><button type="button" aria-haspopup="menu" aria-expanded={profileOpen} onClick={()=>setProfileOpen(v=>!v)} style={{display:"flex",alignItems:"center",gap:"9px",padding:"5px 9px 5px 5px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"12px",color:"inherit",cursor:"pointer",minHeight:"42px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{display:"flex",flexDirection:"column",textAlign:"left",lineHeight:1.2}}><strong style={{fontSize:"11px",maxWidth:"100px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUsername||"Signed-in user"}</strong><small style={{fontSize:"10px",opacity:.7,marginTop:"3px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span><ChevronDown size={14}/></button>{profileOpen&&<><button aria-label="Close profile menu" onClick={()=>setProfileOpen(false)} style={{position:"fixed",inset:0,zIndex:70,border:0,background:"transparent",cursor:"default"}}/><div role="menu" style={{position:"absolute",right:0,top:"calc(100% + 9px)",zIndex:80,width:"230px",padding:"10px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"14px",boxShadow:"0 20px 50px rgba(0,0,0,.35)",color:"inherit"}}><div style={{display:"flex",alignItems:"center",gap:"10px",padding:"8px 7px 12px",borderBottom:"1px solid var(--border, #30394b)",marginBottom:"7px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{minWidth:0}}><strong style={{display:"block",fontSize:"12px",overflowWrap:"anywhere"}}>{currentUsername||"Signed-in user"}</strong><small style={{display:"block",fontSize:"10px",opacity:.7,marginTop:"4px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span></div><button role="menuitem" onClick={()=>{setProfileOpen(false);setToast("You're signed in as "+(currentUsername||"user")+".")}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"inherit",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><ShieldCheck size={15}/> Account information</button><button role="menuitem" onClick={()=>{setProfileOpen(false);logout()}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"#e87989",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><LogOut size={15}/> Log out</button></div></>}</div></div></header>
+<main className="main"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)}><Menu size={18}/></button><span>PayNest</span><ChevronRight size={13}/><b>{titlePage}</b></div><div className="top-actions"><button className="search" onClick={()=>setSearch(true)}><Search size={15}/><span>Search anything</span><kbd><Command size={10}/> K</kbd></button><button className="icon-btn" title="Toggle theme" onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button><NotificationMenu rootRef={notificationRef} isStaff={isStaff} open={notificationOpen} setOpen={(next)=>{setNotificationOpen(typeof next==="function"?next(notificationOpen):next);setWorkspaceOpen(false);setProfileOpen(false)}} notifications={notifications} unreadCount={unreadNotifications.length} readIds={readNotificationIds} onMarkAllRead={markAllNotificationsRead} onOpenNotification={openNotification} onRefresh={refreshSavedDrafts}/><div ref={profileRef} style={{position:"relative",display:"flex",alignItems:"center"}}><button type="button" aria-haspopup="menu" aria-expanded={profileOpen} onClick={()=>{setProfileOpen(v=>!v);setWorkspaceOpen(false);setNotificationOpen(false)}} style={{display:"flex",alignItems:"center",gap:"9px",padding:"5px 9px 5px 5px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"12px",color:"inherit",cursor:"pointer",minHeight:"42px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{display:"flex",flexDirection:"column",textAlign:"left",lineHeight:1.2}}><strong style={{fontSize:"11px",maxWidth:"100px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUsername||"Signed-in user"}</strong><small style={{fontSize:"10px",opacity:.7,marginTop:"3px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span><ChevronDown size={14}/></button>{profileOpen&&<><div role="menu" style={{position:"absolute",right:0,top:"calc(100% + 9px)",zIndex:80,width:"230px",padding:"10px",border:"1px solid var(--border, #30394b)",background:"var(--panel, #171c27)",borderRadius:"14px",boxShadow:"0 20px 50px rgba(0,0,0,.35)",color:"inherit"}}><div style={{display:"flex",alignItems:"center",gap:"10px",padding:"8px 7px 12px",borderBottom:"1px solid var(--border, #30394b)",marginBottom:"7px"}}><span className="avatar">{(currentUsername||"BL").slice(0,2).toUpperCase()}</span><span style={{minWidth:0}}><strong style={{display:"block",fontSize:"12px",overflowWrap:"anywhere"}}>{currentUsername||"Signed-in user"}</strong><small style={{display:"block",fontSize:"10px",opacity:.7,marginTop:"4px"}}>{isStaff?"Brand reviewer":"Content creator"}</small></span></div><button role="menuitem" onClick={()=>{setProfileOpen(false);setToast("You're signed in as "+(currentUsername||"user")+".")}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"inherit",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><ShieldCheck size={15}/> Account information</button><button role="menuitem" onClick={()=>{setProfileOpen(false);logout()}} style={{display:"flex",alignItems:"center",gap:"9px",width:"100%",padding:"10px",border:0,borderRadius:"8px",background:"transparent",color:"#e87989",textAlign:"left",cursor:"pointer",fontSize:"12px"}}><LogOut size={15}/> Log out</button></div></>}</div></div></header>
 
 <div className="content"><AnimatePresence mode="wait">
 
