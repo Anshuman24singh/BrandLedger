@@ -7,10 +7,10 @@ from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
 from .models import Fact, Rule, Draft, Version, Finding, Decision
-from .engine import deterministic_inspect
-
+from .engine import AIReviewError, deterministic_inspect
 
 class WorkflowTests(TestCase):
+
     def setUp(self):
         self.creator = User.objects.create_user(
             "creator",
@@ -485,6 +485,70 @@ class WorkflowTests(TestCase):
         self.assertEqual({fact["status"] for fact in response.json()["facts"]}, {"approved", "superseded"})
         self.assertTrue(response.json()["rules"])
 
+
+
+    # AI review retry tests
+
+    def test_retry_ai_review_restores_complete_review(self):
+        draft_data = self.create_draft("Returns guaranteed.")
+        draft = Draft.objects.get(pk=draft_data["id"])
+        old_finding_ids = list(
+            draft.findings.values_list("id", flat=True)
+        )
+
+        draft.ai_review_complete = False
+        draft.save(update_fields=["ai_review_complete"])
+
+        response = self.client.post(
+            f"/api/drafts/{draft.id}/retry-ai-review/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ai_review_complete"])
+
+        for finding_id in old_finding_ids:
+            self.assertEqual(
+                Finding.objects.get(pk=finding_id).state,
+                "obsolete",
+            )
+
+        self.assertTrue(
+            Decision.objects.filter(
+                draft=draft,
+                action="ai_review_retried",
+            ).exists()
+        )
+
+    def test_failed_ai_review_retry_preserves_incomplete_state(self):
+        draft_data = self.create_draft("Returns guaranteed.")
+        draft = Draft.objects.get(pk=draft_data["id"])
+        draft.ai_review_complete = False
+        draft.save(update_fields=["ai_review_complete"])
+
+        old_findings = list(
+            draft.findings.values_list("id", "state", "version_id")
+        )
+
+        with patch(
+            "core.views.inspect",
+            side_effect=AIReviewError("Service unavailable"),
+        ):
+            response = self.client.post(
+                f"/api/drafts/{draft.id}/retry-ai-review/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        draft.refresh_from_db()
+        self.assertFalse(draft.ai_review_complete)
+
+        self.assertEqual(
+            list(draft.findings.values_list("id", "state", "version_id")),
+            old_findings,
+        )
 
 class AIResponseValidationTests(TestCase):
     def setUp(self):

@@ -191,6 +191,64 @@ def submit_completed_review(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def retry_ai_review(request, pk):
+    """Retry AI review without changing the draft content."""
+    draft = get_object_or_404(accessible_drafts(request.user), pk=pk)
+
+    if draft.author_id != request.user.id and not request.user.is_staff:
+        return Response(
+            {"error": "Only the draft author or a reviewer can retry its AI review."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if draft.status == "approved":
+        return Response(
+            {"error": "Approved drafts are immutable."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    current_version = draft.versions.order_by("-version").first()
+    if current_version is None:
+        return Response(
+            {"error": "This draft has no version to review."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Leave the existing draft untouched if AI review fails.
+    try:
+        findings = inspect(draft.content, draft.brand_id)
+    except AIReviewError:
+        return Response(
+            {"error": "AI review is still unavailable. No draft data was changed."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    with transaction.atomic():
+        # Preserve old findings and decisions as audit history.
+        draft.findings.exclude(state="obsolete").update(state="obsolete")
+
+        for finding in findings:
+            Finding.objects.create(
+                draft=draft,
+                version=current_version,
+                **finding,
+            )
+
+        draft.ai_review_complete = True
+        draft.save(update_fields=["ai_review_complete", "updated_at"])
+
+        Decision.objects.create(
+            draft=draft,
+            actor=request.user,
+            action="ai_review_retried",
+            comment=f"AI review completed for version {current_version.version}.",
+        )
+
+    return Response(DraftSerializer(draft).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def decide(request, pk, finding_id):
     if not request.user.is_staff:
         return Response({"error": "Reviewer permission required"}, status=status.HTTP_403_FORBIDDEN)
