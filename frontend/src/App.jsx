@@ -116,7 +116,7 @@ const [changeDraftId,setChangeDraftId]=useState("");
 const [draftChanges,setDraftChanges]=useState(null);
 const [includedChangeIndexes,setIncludedChangeIndexes]=useState([]);
 const [changesLoading,setChangesLoading]=useState(false);
-
+const [aiReviewComplete,setAiReviewComplete]=useState(true);
 useEffect(()=>{
   function closeTransientPanels(event){
     if(notificationRef.current && !notificationRef.current.contains(event.target)) setNotificationOpen(false);
@@ -237,6 +237,7 @@ useEffect(()=>{
         const saved = await api.getDraft(savedId);
         if(cancelled) return;
         setBackendDraftId(saved.id);
+        setAiReviewComplete(saved.ai_review_complete !== false);
         setTitle(saved.title || "Untitled campaign draft");
         setDraft(saved.content || "");
         setCampaign("Saved campaign");
@@ -377,6 +378,7 @@ async function review(){
       if (result?.id != null) { setBackendDraftId(result.id); sessionStorage.setItem("bl-last-draft-id", String(result.id)); }
       await refreshSavedDrafts();
     }
+    setAiReviewComplete(result?.ai_review_complete !== false);
     const list = mapBackendFindings(result?.findings);
     setFindings(list);
     setActive(list[0]?.id || null);
@@ -448,6 +450,7 @@ async function apply(f){
     // Save first. Only update the editor after the backend accepts the revision.
     if (backendDraftId && authenticated) {
       const result = await api.revise(backendDraftId, t);
+      setAiReviewComplete(result?.ai_review_complete !== false);
       const list = mapBackendFindings(result?.findings);
       setDraft(t);
       setVersions(v => [
@@ -561,6 +564,7 @@ async function openSavedDraft(id){
   try {
     const saved = await api.getDraft(id);
     setBackendDraftId(saved.id);
+    setAiReviewComplete(saved.ai_review_complete !== false);
     sessionStorage.setItem("bl-last-draft-id", String(saved.id));
     setTitle(saved.title || "Untitled campaign draft");
     setDraft(saved.content || "");
@@ -588,6 +592,7 @@ function newDraft(){
   setActive(null);
   setResolved([]);
   setBackendDraftId(null);
+  setAiReviewComplete(true);
   sessionStorage.removeItem("bl-last-draft-id");
   setStatus("Not reviewed");
   setDecision("");
@@ -666,6 +671,7 @@ useEffect(()=>{
     try{
       const saved=await api.getDraft(backendDraftId);
       if(cancelled) return;
+      setAiReviewComplete(saved.ai_review_complete !== false);
       setTitle(saved.title || "Untitled campaign draft");
       setDraft(saved.content || "");
       const list=mapBackendFindings(saved.findings);
@@ -833,6 +839,7 @@ return <div className={`app theme-${theme}`}>
 {!isStaff&&backendDraftId&&status==="Ready for client review"&&<section className="panel" style={{padding:"12px 15px",marginBottom:"14px",border:"1px solid var(--border, #343a49)",borderLeft:"3px solid #5bd49a"}}><b style={{fontSize:"13px"}}>Completed review sent to Reviewer</b><p style={{fontSize:"12px",lineHeight:1.5,opacity:.8,margin:"5px 0 0"}}>The client can now review the corrected draft and approve it or request further changes.</p></section>}
 {!isStaff&&backendDraftId&&["Approved","Rejected","Changes requested"].includes(status)&&<section className="panel" style={{padding:"12px 15px",marginBottom:"14px",border:"1px solid var(--border, #343a49)",borderLeft:`3px solid ${status==="Approved"?"#5bd49a":status==="Rejected"?"#e87989":"#e8b45b"}`}}><b style={{fontSize:"13px"}}>Reviewer outcome: {status}</b><p style={{fontSize:"12px",lineHeight:1.5,opacity:.8,margin:"5px 0 0"}}>{latestReviewerDecision(savedDrafts.find(item=>String(item.id)===String(backendDraftId)))?.comment || (status==="Approved"?"The reviewer approved this draft.":status==="Rejected"?"The reviewer rejected this draft.":"Please revise this draft based on the reviewer feedback.")}</p></section>}
 {(!isStaff||backendDraftId)&&<div className="docbar"><span className="file-icon"><FileText size={17}/></span><span className="docname"><b>{title}</b><small>{campaign} · Last edited just now</small></span>{!isStaff&&<button className="icon-btn" title="Rename draft" onClick={()=>{let t=prompt("Rename draft",title);if(t?.trim())setTitle(t.trim())}}><Settings2 size={15}/></button>}<Pill tone={status==="Approved"?"good":status==="Not reviewed"?"": "warn"}>{status}</Pill></div>}
+{backendDraftId!=null&&!aiReviewComplete&&<div role="alert" className="disclaimer" style={{marginBottom:"14px",border:"1px solid rgba(232,180,91,.45)",background:"rgba(232,180,91,.08)",padding:"12px 14px",borderRadius:"10px",color:"inherit"}}><AlertTriangle size={15}/><span><b>AI review incomplete.</b> The draft was saved, but the AI provider did not finish reviewing it. Approval is blocked until a successful AI-reviewed revision completes.</span></div>}
 
 <div className={`review-grid ${!showEvidence?"wide":""}`}>{!isStaff ? <section className="panel editor"><div className="editor-head"><span><i/> CONTENT DRAFT <small>· Plain text</small></span><button onClick={()=>setShowEvidence(v=>!v)}><PanelRightClose size={15}/></button></div><div className="fields"><label>CONTENT TITLE<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>CAMPAIGN<input value={campaign} onChange={e=>setCampaign(e.target.value)}/></label></div><label className="draft-label">Draft content <small>· {draft.trim()?draft.trim().split(/\s+/).length:0} words</small></label><textarea className="draft" value={draft} onChange={e=>{setDraft(e.target.value);if(status==="Ready for client review")setStatus("In progress");}} placeholder="Paste campaign copy here…" spellCheck/><div className="editor-foot"><span><LockKeyhole size={13}/> Original stays unchanged until you apply a suggestion.</span><span>{draft.length} chars</span></div>{findings.length>0&&<div className="highlight-preview"><div> <Sparkles size={13}/> FLAGGED CONTENT PREVIEW <small>Click a phrase to inspect it</small></div><p>{draft.split(/(guaranteed|7%|risk-free)/gi).map((part,i)=>{let f=findings.find(x=>x.term?.toLowerCase()===part.toLowerCase());return f?<mark key={i} className={`${f.severity} ${active===f.id?"chosen":""}`} onClick={()=>setActive(f.id)}>{part}</mark>:<React.Fragment key={i}>{part}</React.Fragment>})}</p></div>}<div className="editor-actions"><Btn onClick={()=>{setFindings([]);setResolved([]);setStatus("Not reviewed");setToast("Findings cleared")}}><X size={14}/> Clear findings</Btn><Btn kind="primary" disabled={busy} onClick={review}>{busy?<><span className="spinner"/> Checking content…</>:<><Sparkles size={15}/> Run brand review <ArrowRight size={15}/></>}</Btn>{backendDraftId&&<Btn kind="approve" disabled={busy||status==="Ready for client review"||status==="Approved"} onClick={submitCompletedReview}>{busy?<><span className="spinner"/> Sending…</>:<><CheckCheck size={15}/> Send completed review to Reviewer <ArrowRight size={15}/></>}</Btn>}</div><div className="method-note"><ShieldCheck size={14}/> Deterministic checks run first. AI interpretation is handled by the backend when enabled.</div></section> : <section className="panel editor"><div className="editor-head"><span><i/> SUBMITTED CONTENT <small>· Read-only for reviewers</small></span><span><LockKeyhole size={13}/> Creator edits this draft</span></div><div className="fields"><label>CONTENT TITLE<input value={title} readOnly/></label><label>CAMPAIGN<input value={campaign} readOnly/></label></div><label className="draft-label">Submitted draft</label><div className="draft" style={{whiteSpace:"pre-wrap",minHeight:"260px",cursor:"default"}}>{backendDraftId ? (draft || "This submission has no text content.") : "Choose a submission from the list below to inspect its content and findings."}</div><div className="editor-actions"><Btn kind="primary" disabled={busy||!backendDraftId} onClick={review}>{busy?<><span className="spinner"/> Running review…</>:<><Sparkles size={15}/> Run brand review <ArrowRight size={15}/></>}</Btn></div><div className="method-note"><ShieldCheck size={14}/> Reviewer analysis is read-only. You can request changes, but only the Creator can edit the draft.</div></section>}
 
