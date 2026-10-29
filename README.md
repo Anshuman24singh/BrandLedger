@@ -197,3 +197,15 @@ GitHub Actions runs `python manage.py check`, the Django test suite, and `npm ru
 ## 📄 License
 
 No license has been specified yet.
+## Reviewer-owned workspace behavior (updated)
+
+- Reviewer/staff accounts create brands from the Dashboard and manage each brand's guidelines.
+- Creator accounts can view guidelines and prepare drafts for reviewer-owned brands, but cannot create brands or modify guidelines.
+- The Brand Guidelines page has its own brand selector so changing the displayed rulebook does not change the Dashboard workspace selector.
+- Reviewers can run a read-only review against a submitted draft. This endpoint returns findings without saving edits or creating a new draft version.
+- Creator-change comparisons now attach related current-version findings where the changed text can be matched to a finding excerpt. Unmatched changes are labelled for manual inspection.
+- Suggestions marked `Human review required`, or with no traceable source, are not actionable and the frontend does not show Apply Suggestion for them.
+
+### Verification status for this update
+
+Python syntax compilation and TypeScript's JSX parser passed for the modified source files. The full Django test suite and Vite production build were not run in this environment because Django is not installed and the frontend dependency installation could not complete. Run `python manage.py test` and `npm run build` locally before deploying.

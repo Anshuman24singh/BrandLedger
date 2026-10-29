@@ -85,14 +85,24 @@ export const api = {
     return request(`/drafts/${encodeURIComponent(id)}/`);
   },
 
-  knowledge() {
-    return request("/knowledge/");
+  knowledge(brandId = null) {
+    return request(`/knowledge/${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`);
   },
+  listBrands() { return request("/brands/"); },
+  createBrand(name) { return request("/brands/", { method:"POST", body:JSON.stringify({name}) }); },
+  updateBrand(id, name) { return request(`/brands/${encodeURIComponent(id)}/`, { method:"PATCH", body:JSON.stringify({name}) }); },
+  deleteBrand(id) { return request(`/brands/${encodeURIComponent(id)}/`, { method:"DELETE" }); },
+  createGuideline(data) { return request("/guidelines/", { method:"POST", body:JSON.stringify(data) }); },
+  updateGuideline(id, data) { return request(`/guidelines/${encodeURIComponent(id)}/`, { method:"PATCH", body:JSON.stringify(data) }); },
+  deleteGuideline(id) { return request(`/guidelines/${encodeURIComponent(id)}/`, { method:"DELETE" }); },
+  reviewDraft(id) { return request(`/drafts/${encodeURIComponent(id)}/review/`, { method:"POST", body:JSON.stringify({}) }); },
+  getDraftChanges(id) { return request(`/drafts/${encodeURIComponent(id)}/changes/`); },
+  applyDraftChanges(id, include) { return request(`/drafts/${encodeURIComponent(id)}/apply-changes/`, { method:"POST", body:JSON.stringify({include}) }); },
 
-  createDraft({ title, content }) {
+  createDraft({ title, content, brand = null }) {
     return request("/drafts/", {
       method: "POST",
-      body: JSON.stringify({ title, content }),
+      body: JSON.stringify({ title, content, brand }),
     });
   },
 
@@ -104,6 +114,13 @@ export const api = {
         body: JSON.stringify({ content }),
       }
     );
+  },
+
+  submitCompletedReview(id, comment = "Completed corrections submitted for client review.") {
+    return request(`/drafts/${encodeURIComponent(id)}/submit-completed-review/`, {
+      method: "POST",
+      body: JSON.stringify({ comment }),
+    });
   },
 
   decide(draftId, findingId, action, comment = "") {

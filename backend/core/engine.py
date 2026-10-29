@@ -17,7 +17,7 @@ def _is_instructional_suggestion(value):
     if text == "human review required":
         return True
     patterns = (
-        r"^(please\s+)?(remove|delete|replace|rewrite|change|avoid|describe|explain|ask|use|consider|ensure|make sure|try|review|substantiate|verify|confirm|check)\b",
+        r"^(please\s+)?(remove|delete|replace|rewrite|change|avoid|describe|explain|ask|consider|ensure|make sure|try|substantiate|verify|confirm|check)\b",
         r"^(this|the) (phrase|claim|text|sentence|wording)\b",
         r"\b(review|revise) this (claim|phrase|text|sentence)\b",
         r"\bapproved wording\b",
@@ -25,11 +25,11 @@ def _is_instructional_suggestion(value):
     return any(re.search(pattern, text) for pattern in patterns)
 
 
-def deterministic_inspect(content):
+def deterministic_inspect(content, brand_id=None):
     """Run existing rule and approved-fact checks without using AI."""
     findings = []
 
-    for rule in Rule.objects.all():
+    for rule in Rule.objects.filter(brand_id=brand_id) if brand_id else Rule.objects.filter(brand__isnull=True):
         for match in re.finditer(re.escape(rule.phrase), content, re.I):
             findings.append({
                 "kind": "prohibited_term",
@@ -43,7 +43,7 @@ def deterministic_inspect(content):
                 "source": f"{rule.code}: {rule.source}",
             })
 
-    for fact in Fact.objects.filter(status="approved"):
+    for fact in Fact.objects.filter(status="approved", brand_id=brand_id) if brand_id else Fact.objects.filter(status="approved", brand__isnull=True):
         key = fact.key.strip()
 
         pattern = (
@@ -75,7 +75,7 @@ def deterministic_inspect(content):
 
 
 
-def groq_inspect(content):
+def groq_inspect(content, brand_id=None):
     """Find semantic brand-governance issues using Groq and approved context."""
 
     api_key = os.environ.get("GROQ_API_KEY")
@@ -86,17 +86,10 @@ def groq_inspect(content):
             "GROQ_API_KEY is not configured; cannot perform AI review."
         )
 
-    facts = list(
-        Fact.objects.filter(status="approved").values(
-            "key", "value", "source"
-        )
-    )
-
-    rules = list(
-        Rule.objects.all().values(
-            "code", "phrase", "replacement", "explanation", "source"
-        )
-    )
+    fact_qs = Fact.objects.filter(status="approved", brand_id=brand_id) if brand_id else Fact.objects.filter(status="approved", brand__isnull=True)
+    rule_qs = Rule.objects.filter(brand_id=brand_id) if brand_id else Rule.objects.filter(brand__isnull=True)
+    facts = list(fact_qs.values("key", "value", "source"))
+    rules = list(rule_qs.values("code", "phrase", "replacement", "explanation", "source"))
 
     prompt = f"""
 Analyze this draft for brand-governance issues:
@@ -233,6 +226,11 @@ DRAFT:
                 source = "Human review required"
             if _is_instructional_suggestion(suggestion):
                 suggestion = "Human review required"
+            # A replacement is actionable only when it is backed by an actual
+            # supplied fact/rule. A placeholder source means the evidence is
+            # not traceable, so require a human rather than showing Apply.
+            if source == "Human review required":
+                suggestion = "Human review required"
 
             findings.append({
                 "kind": kind,
@@ -250,12 +248,12 @@ DRAFT:
             "AI review failed. Please try again later."
           ) from exc
 
-def inspect(content):
+def inspect(content, brand_id=None):
     """Combine deterministic checks with AI findings while avoiding duplicates."""
-    findings = deterministic_inspect(content)
+    findings = deterministic_inspect(content, brand_id)
 
     # AI failures must propagate so the API can fail safely.
-    ai_findings = groq_inspect(content)
+    ai_findings = groq_inspect(content, brand_id)
 
     def normalize(text):
         return re.sub(r"\s+", " ", text).strip().casefold()
@@ -282,7 +280,7 @@ def inspect(content):
             # already identified by deterministic checks.
             same_prohibited_issue = (
                 existing_finding["kind"] == "prohibited_term"
-                and ai_finding["kind"] == "brand_tone"
+                and ai_finding["kind"] in {"brand_tone", "unsupported_claim"}
                 and overlaps(existing_finding["excerpt"], ai_finding["excerpt"])
             )
             same_fact_issue = (
@@ -290,7 +288,18 @@ def inspect(content):
                 and ai_finding["kind"] == "unsupported_claim"
                 and overlaps(existing_finding["excerpt"], ai_finding["excerpt"])
             )
-            if same_prohibited_issue or same_fact_issue:
+            # Some AI explanations quote a rule code while describing the claim
+            # in different words. Prefer the deterministic, source-backed rule
+            # finding instead of showing a duplicate placeholder finding.
+            existing_source = str(existing_finding.get("source", ""))
+            rule_code = existing_source.split(":", 1)[0].strip() if existing_finding["kind"] == "prohibited_term" else ""
+            same_rule_issue = bool(
+                rule_code
+                and ai_finding["kind"] in {"brand_tone", "unsupported_claim"}
+                and (rule_code.casefold() in str(ai_finding.get("reason", "")).casefold()
+                     or rule_code.casefold() in str(ai_finding.get("source", "")).casefold())
+            )
+            if same_prohibited_issue or same_fact_issue or same_rule_issue:
                 # Preserve the deterministic finding, but borrow the AI's
                 # usable replacement if the stored rule only has instructions.
                 if _is_instructional_suggestion(existing_finding.get("suggestion")) and not _is_instructional_suggestion(ai_finding.get("suggestion")):

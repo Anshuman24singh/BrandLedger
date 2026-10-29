@@ -1,20 +1,36 @@
 from django.db import models
 from django.contrib.auth.models import User
+
+class Brand(models.Model):
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="brands")
+    members = models.ManyToManyField(User, blank=True, related_name="brand_memberships")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        unique_together = [("name", "created_by")]
+        ordering = ["name"]
+    def __str__(self): return self.name
+
 class Fact(models.Model):
- key=models.CharField(max_length=80,unique=True)
+ brand=models.ForeignKey(Brand,on_delete=models.CASCADE,null=True,blank=True,related_name="facts")
+ key=models.CharField(max_length=80)
  value=models.CharField(max_length=250)
  source=models.CharField(max_length=300)
  status=models.CharField(max_length=20,choices=[('approved','Approved'),('superseded','Superseded')],default='approved')
  effective_date=models.DateField(null=True,blank=True)
  def __str__(self):return self.key+' = '+self.value
+
 class Rule(models.Model):
- code=models.CharField(max_length=40,unique=True)
+ brand=models.ForeignKey(Brand,on_delete=models.CASCADE,null=True,blank=True,related_name="rules")
+ code=models.CharField(max_length=40)
  phrase=models.CharField(max_length=200)
  replacement=models.CharField(max_length=200,blank=True)
  explanation=models.TextField()
  source=models.CharField(max_length=250,default='Brand style guide')
  def __str__(self):return self.code
+
 class Draft(models.Model):
+ brand=models.ForeignKey(Brand,on_delete=models.SET_NULL,null=True,blank=True,related_name="drafts")
  title=models.CharField(max_length=200)
  content=models.TextField()
  author=models.ForeignKey(User,on_delete=models.PROTECT,related_name='drafts')

@@ -4,7 +4,7 @@ import os
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 
-from core.models import Fact, Rule
+from core.models import Brand, Fact, Rule
 
 
 class Command(BaseCommand):
@@ -32,8 +32,11 @@ class Command(BaseCommand):
                 f'{"Created" if created else "Updated"} demo account: {username}'
             )
 
+        creator = User.objects.get(username="creator")
+        brand, _ = Brand.objects.get_or_create(name="PayNest", created_by=creator)
+        brand.members.add(creator, User.objects.get(username="reviewer"))
         Fact.objects.update_or_create(
-            key="savings rate",
+            brand=brand, key="savings rate",
             defaults={
                 "value": "6.5%",
                 "source": "PayNest Approved Facts v2, F-014",
@@ -41,7 +44,7 @@ class Command(BaseCommand):
             },
         )
         Fact.objects.update_or_create(
-            key="old savings rate",
+            brand=brand, key="old savings rate",
             defaults={
                 "value": "6.0%",
                 "source": "PayNest Approved Facts v1, F-009",
@@ -49,7 +52,7 @@ class Command(BaseCommand):
             },
         )
         Rule.objects.update_or_create(
-            code="R-12",
+            brand=brand, code="R-12",
             defaults={
                 "phrase": "guaranteed",
                 # No phrase-only replacement is safe in every sentence.
@@ -62,7 +65,7 @@ class Command(BaseCommand):
             },
         )
         Rule.objects.update_or_create(
-            code="R-13",
+            brand=brand, code="R-13",
             defaults={
                 "phrase": "risk-free",
                 "replacement": "",

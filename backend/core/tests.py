@@ -207,6 +207,40 @@ class WorkflowTests(TestCase):
             Draft.objects.filter(pk=draft["id"]).exists()
         )
 
+    def test_creator_can_access_client_submitted_draft_and_send_it_back(self):
+        self.client.force_authenticate(user=self.reviewer)
+        client_draft_response = self.client.post(
+            "/api/drafts/",
+            {"title": "Client campaign", "content": "A carefully prepared product announcement."},
+            format="json",
+        )
+        self.assertEqual(client_draft_response.status_code, 201)
+        draft_id = client_draft_response.json()["id"]
+
+        self.client.force_authenticate(user=self.creator)
+        detail_response = self.client.get(f"/api/drafts/{draft_id}/")
+        self.assertEqual(detail_response.status_code, 200)
+
+        submit_response = self.client.post(
+            f"/api/drafts/{draft_id}/submit-completed-review/",
+            {"comment": "Corrections are complete; ready for client review."},
+            format="json",
+        )
+        self.assertEqual(submit_response.status_code, 200)
+        self.assertEqual(submit_response.json()["status"], "ready_for_client_review")
+        self.assertTrue(Decision.objects.filter(draft_id=draft_id, action="sent_to_client", actor=self.creator).exists())
+
+        self.client.force_authenticate(user=self.reviewer)
+        reviewer_response = self.client.get(f"/api/drafts/{draft_id}/")
+        self.assertEqual(reviewer_response.status_code, 200)
+        self.assertEqual(reviewer_response.json()["status"], "ready_for_client_review")
+
+    def test_reviewer_cannot_use_creator_submit_completed_review_endpoint(self):
+        draft = self.create_draft("A campaign draft.")
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post(f"/api/drafts/{draft['id']}/submit-completed-review/", {}, format="json")
+        self.assertEqual(response.status_code, 403)
+
     def test_creator_cannot_access_another_users_draft(self):
         self.client.force_authenticate(user=self.other_creator)
         draft = self.create_draft("Another user's announcement.")
@@ -642,3 +676,51 @@ class DuplicateSuppressionTests(TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["kind"], "brand_tone")
 
+
+
+class ReviewerBrandOwnershipTests(TestCase):
+    def setUp(self):
+        self.reviewer = User.objects.create_user("brand_owner", password="test123", is_staff=True)
+        self.creator = User.objects.create_user("brand_worker", password="test123")
+        self.client = APIClient()
+
+    def test_reviewer_can_create_brand_and_creator_can_read_guidelines(self):
+        self.client.force_authenticate(user=self.reviewer)
+        created = self.client.post("/api/brands/", {"name": "Owner Brand"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        brand_id = created.json()["id"]
+        self.client.post("/api/guidelines/", {
+            "brand": brand_id, "code": "T-1", "phrase": "guaranteed",
+            "replacement": "may vary", "explanation": "Do not guarantee outcomes.",
+            "source": "Owner rules",
+        }, format="json")
+        self.client.force_authenticate(user=self.creator)
+        visible = self.client.get(f"/api/knowledge/?brand_id={brand_id}")
+        self.assertEqual(visible.status_code, 200)
+        self.assertEqual(len(visible.json()["rules"]), 1)
+        forbidden = self.client.post("/api/guidelines/", {
+            "brand": brand_id, "code": "T-2", "phrase": "bad", "explanation": "No"
+        }, format="json")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_creator_cannot_create_brand(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.post("/api/brands/", {"name": "Unauthorized"}, format="json")
+        self.assertEqual(response.status_code, 403)
+
+    @patch("core.views.inspect", return_value=[{
+        "kind": "unsupported_claim", "excerpt": "guaranteed",
+        "reason": "Unsupported promise", "suggestion": "may vary", "source": "T-1: Owner rules"
+    }])
+    def test_reviewer_can_run_read_only_review(self, inspect_mock):
+        from .models import Brand
+        brand = Brand.objects.create(name="Review Brand", created_by=self.reviewer)
+        draft = Draft.objects.create(title="Review", content="guaranteed", author=self.creator, brand=brand)
+        Version.objects.create(draft=draft, content=draft.content, version=1, editor=self.creator)
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post(f"/api/drafts/{draft.id}/review/", {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["read_only"])
+        draft.refresh_from_db()
+        self.assertEqual(draft.content, "guaranteed")
+        self.assertEqual(draft.versions.count(), 1)
