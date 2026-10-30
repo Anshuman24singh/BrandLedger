@@ -31,3 +31,6 @@ staticfiles/
 
 
 REPAIR_NOTES.md
+
+# Local backup files
+*.bak
