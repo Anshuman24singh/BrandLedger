@@ -16,7 +16,7 @@ class Fact(models.Model):
  key=models.CharField(max_length=80)
  value=models.CharField(max_length=250)
  source=models.CharField(max_length=300)
- status=models.CharField(max_length=20,choices=[('approved','Approved'),('superseded','Superseded')],default='approved')
+ status=models.CharField(max_length=20,choices=[('approved','Approved'),('superseded','Superseded'),('withdrawn','Withdrawn')],default='approved')
  effective_date=models.DateField(null=True,blank=True)
  def __str__(self):return self.key+' = '+self.value
 
@@ -95,3 +95,25 @@ class Decision(models.Model):
  action=models.CharField(max_length=30)
  comment=models.TextField(blank=True)
  created_at=models.DateTimeField(auto_now_add=True)
+
+class FactAudit(models.Model):
+    ACTION_CHOICES = [
+        ("created", "Created"),
+        ("replaced", "Replaced"),
+        ("updated", "Updated"),
+        ("withdrawn", "Withdrawn"),
+    ]
+
+    fact = models.ForeignKey(Fact, on_delete=models.PROTECT, related_name="audit_events")
+    brand = models.ForeignKey(Brand, on_delete=models.PROTECT, related_name="fact_audit_events")
+    actor = models.ForeignKey(User, on_delete=models.PROTECT, related_name="fact_audit_events")
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    before = models.JSONField(default=dict, blank=True)
+    after = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.action}: {self.fact.key} ({self.created_at:%Y-%m-%d %H:%M})"

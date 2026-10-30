@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
-from .models import Fact, Rule, Draft, Version, Finding, Decision
+from .models import Brand, Fact, FactAudit, Rule, Draft, Version, Finding, Decision
 from .engine import AIReviewError, deterministic_inspect
 
 class WorkflowTests(TestCase):
@@ -803,3 +803,122 @@ class ReviewerBrandOwnershipTests(TestCase):
         draft.refresh_from_db()
         self.assertEqual(draft.content, "guaranteed")
         self.assertEqual(draft.versions.count(), 1)
+
+
+class ClaimsLedgerTests(TestCase):
+    def setUp(self):
+        from .models import Brand, Fact, FactAudit
+        self.creator = User.objects.create_user("ledger_creator", password="test123")
+        self.reviewer = User.objects.create_user("ledger_reviewer", password="test123", is_staff=True)
+        self.brand = Brand.objects.create(name="Ledger Test Brand", created_by=self.reviewer)
+        self.client = APIClient()
+        self.Fact = Fact
+        self.FactAudit = FactAudit
+
+    def test_reviewer_can_create_fact_and_audit_records_actor_and_time(self):
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post("/api/facts/", {
+            "brand": self.brand.id, "key": "savings rate", "value": "6.5%",
+            "source": "Approved product sheet", "effective_date": "2026-10-30",
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        audit = self.FactAudit.objects.get(fact_id=response.json()["id"])
+        self.assertEqual(audit.actor, self.reviewer)
+        self.assertEqual(audit.action, "created")
+        self.assertTrue(audit.created_at)
+        self.assertEqual(audit.after["value"], "6.5%")
+
+    def test_creator_is_forbidden_from_creating_fact(self):
+        self.client.force_authenticate(user=self.creator)
+        response = self.client.post("/api/facts/", {
+            "brand": self.brand.id, "key": "savings rate", "value": "6.5%",
+            "source": "Approved product sheet",
+        }, format="json")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.Fact.objects.filter(brand=self.brand).count(), 0)
+
+    def test_replacing_fact_preserves_previous_value_as_superseded(self):
+        old = self.Fact.objects.create(brand=self.brand, key="savings rate", value="6.5%", source="Old sheet")
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post("/api/facts/", {
+            "brand": self.brand.id, "key": "Savings Rate", "value": "7%",
+            "source": "New approved product sheet",
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        old.refresh_from_db()
+        self.assertEqual(old.status, "superseded")
+        new = self.Fact.objects.get(pk=response.json()["id"])
+        self.assertEqual(new.status, "approved")
+        audit = self.FactAudit.objects.get(fact=new)
+        self.assertEqual(audit.action, "replaced")
+        self.assertEqual(audit.actor, self.reviewer)
+        self.assertEqual(audit.before["facts"][0]["value"], "6.5%")
+        self.assertEqual(audit.after["value"], "7%")
+
+    def test_reviewer_can_create_fact_for_brand_owned_by_another_reviewer(self):
+        from .models import Brand
+        other = User.objects.create_user("other_ledger_reviewer", password="test123", is_staff=True)
+        other_brand = Brand.objects.create(name="Other Brand", created_by=other)
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.post("/api/facts/", {
+            "brand": other_brand.id, "key": "claim", "value": "value", "source": "source",
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["brand"], other_brand.id)
+        self.assertTrue(Fact.objects.filter(brand=other_brand, key="claim", status="approved").exists())
+
+
+class ClaimsLedgerCrudTests(TestCase):
+    def setUp(self):
+        self.reviewer = User.objects.create_user("ledger_reviewer", password="test123", is_staff=True)
+        self.other_reviewer = User.objects.create_user("other_reviewer", password="test123", is_staff=True)
+        self.creator = User.objects.create_user("ledger_creator", password="test123")
+        self.brand = Brand.objects.create(name="Ledger Test Brand", created_by=self.reviewer)
+        self.fact = Fact.objects.create(brand=self.brand, key="savings rate", value="6.5%", source="F-014")
+        self.client = APIClient()
+
+    def test_reviewer_can_edit_fact_and_old_record_is_preserved(self):
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.patch(f"/api/facts/{self.fact.id}/", {
+            "key": "savings rate", "value": "7%", "source": "F-015", "effective_date": None,
+        }, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.status, "superseded")
+        replacement = Fact.objects.get(pk=response.json()["id"])
+        self.assertEqual(replacement.value, "7%")
+        self.assertEqual(replacement.status, "approved")
+        self.assertTrue(FactAudit.objects.filter(fact=self.fact, action="updated", actor=self.reviewer).exists())
+
+    def test_reviewer_can_withdraw_without_deleting_record(self):
+        self.client.force_authenticate(user=self.reviewer)
+        response = self.client.delete(f"/api/facts/{self.fact.id}/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.status, "withdrawn")
+        self.assertTrue(Fact.objects.filter(pk=self.fact.pk).exists())
+        self.assertTrue(FactAudit.objects.filter(fact=self.fact, action="withdrawn", actor=self.reviewer).exists())
+
+    def test_creator_cannot_edit_or_withdraw_fact(self):
+        self.client.force_authenticate(user=self.creator)
+        patch_response = self.client.patch(f"/api/facts/{self.fact.id}/", {"value": "7%"}, format="json")
+        delete_response = self.client.delete(f"/api/facts/{self.fact.id}/")
+        self.assertEqual(patch_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.status, "approved")
+
+    def test_other_reviewer_can_edit_fact_owned_by_another_reviewer(self):
+        self.client.force_authenticate(user=self.other_reviewer)
+        response = self.client.patch(
+            f"/api/facts/{self.fact.id}/",
+            {"value": "7%", "key": "savings rate", "source": "F-015", "effective_date": None},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.status, "superseded")
+        replacement = Fact.objects.get(pk=response.json()["id"])
+        self.assertEqual(replacement.value, "7%")
+        self.assertEqual(replacement.status, "approved")
+        self.assertTrue(FactAudit.objects.filter(fact=replacement, actor=self.other_reviewer).exists())

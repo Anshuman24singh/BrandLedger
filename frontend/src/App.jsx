@@ -102,6 +102,87 @@ function NotificationMenu({isStaff,open,setOpen,notifications,unreadCount,readId
   </div>;
 }
 
+
+function ClaimsLedgerView({isStaff, selectedBrandId}){
+  const [facts, setFacts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [auditFact, setAuditFact] = useState(null);
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [auditError, setAuditError] = useState("");
+  const [editingFact, setEditingFact] = useState(null);
+  const blankForm = {key:"",value:"",source:"Approved brand source",effective_date:""};
+  const [form, setForm] = useState(blankForm);
+
+  async function loadFacts(){
+    setLoading(true); setError("");
+    try { const data = await api.knowledge(selectedBrandId || null); setFacts(Array.isArray(data?.facts)?data.facts:[]); }
+    catch(e){ setError(e.message || "Could not load facts."); }
+    finally { setLoading(false); }
+  }
+  useEffect(()=>{loadFacts();},[selectedBrandId]);
+
+  function startEdit(fact){
+    setEditingFact(fact);
+    setForm({key:fact.key||"",value:fact.value||"",source:fact.source||"",effective_date:fact.effective_date||""});
+    setError("");
+  }
+  function cancelEdit(){setEditingFact(null);setForm(blankForm);setError("");}
+
+  async function saveFact(e){
+    e.preventDefault();
+    if(!selectedBrandId){setError("Select a brand before adding a fact.");return;}
+    setSaving(true);setError("");
+    try {
+      const payload={key:form.key.trim(),value:form.value.trim(),source:form.source.trim(),effective_date:form.effective_date||null};
+      if(editingFact) await api.updateFact(editingFact.id,payload);
+      else await api.createFact({brand:Number(selectedBrandId),...payload});
+      cancelEdit();
+      await loadFacts();
+    } catch(e){setError(e.message||`Could not ${editingFact?"update":"save"} fact.`);}
+    finally{setSaving(false);}
+  }
+  async function withdrawFact(fact){
+    if(!window.confirm(`Withdraw “${fact.key}” (${fact.value})? It will no longer be an approved claim, and its record and audit history will be retained.`)) return;
+    setSaving(true);setError("");
+    try{await api.deleteFact(fact.id);if(editingFact?.id===fact.id)cancelEdit();await loadFacts();if(auditFact?.id===fact.id)await showAudit(fact);}
+    catch(e){setError(e.message||"Could not withdraw fact.");}
+    finally{setSaving(false);}
+  }
+  async function showAudit(fact){
+    setAuditFact(fact);setAuditEvents([]);setAuditError("");
+    try{setAuditEvents(await api.factAudit(fact.id));}
+    catch(e){setAuditError(e.message||"Could not load audit history.");}
+  }
+
+  return <motion.section key="claims" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}>
+    <div className="page-head"><div><div className="eyebrow"><i/> REFERENCE / APPROVED FACTS</div><h1>Claims ledger</h1><p>Approved and historical product facts with reviewer-controlled changes and audit history.</p></div><Btn onClick={loadFacts} disabled={loading}><RefreshCw size={14}/> Refresh facts</Btn></div>
+    <div className="intro-card"><Layers3 size={24}/><span><b>Verified facts, with a history</b><small>Editing supersedes the old record. Withdrawal marks a fact as withdrawn rather than permanently deleting it. Only approved facts should be used by the review engine.</small></span><Pill>{facts.length} records</Pill></div>
+    {error&&<p className="disclaimer"><AlertTriangle size={14}/>{error}</p>}
+    {isStaff&&<section className="panel" style={{padding:18,marginBottom:18}}><h3 style={{marginTop:0}}>{editingFact?`Edit approved fact · ${editingFact.key}`:"Add an approved fact"}</h3><p style={{fontSize:12,opacity:.75}}>{editingFact?"Saving creates a new approved version and retains the previous record as superseded.":"Use the same fact key to replace its current approved value. Previous approved records remain in the ledger."}</p>
+      <form onSubmit={saveFact}><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
+        <input required maxLength={80} placeholder="Fact key (e.g. savings rate)" value={form.key} onChange={e=>setForm({...form,key:e.target.value})}/>
+        <input required maxLength={250} placeholder="Approved value" value={form.value} onChange={e=>setForm({...form,value:e.target.value})}/>
+        <input required maxLength={300} placeholder="Source / reference" value={form.source} onChange={e=>setForm({...form,source:e.target.value})}/>
+        <input type="date" aria-label="Effective date" value={form.effective_date} onChange={e=>setForm({...form,effective_date:e.target.value})}/>
+      </div><div style={{display:"flex",gap:10,alignItems:"center",marginTop:12,flexWrap:"wrap"}}><Btn kind="primary" disabled={saving||!selectedBrandId}><Check size={14}/>{saving?"Saving…":editingFact?"Save changes":"Save approved fact"}</Btn>{editingFact&&<Btn onClick={cancelEdit} disabled={saving}><X size={14}/> Cancel edit</Btn>}{!selectedBrandId&&<small>Select a brand first.</small>}</div></form>
+    </section>}
+    <section className="panel table"><div className="table-head"><b>Approved and historical facts</b><span>{loading?"LOADING…":"LIVE BACKEND DATA"}</span></div>
+      <div className="table-scroll"><table><thead><tr><th>FACT</th><th>VALUE</th><th>STATUS</th><th>EFFECTIVE DATE</th><th>SOURCE</th><th>ACTIONS / AUDIT</th></tr></thead><tbody>
+      {facts.map(f=><tr key={f.id}><td><b>{f.key}</b></td><td>{f.value}</td><td><Pill tone={f.status==="approved"?"good":f.status==="withdrawn"?"warn":""}>{f.status}</Pill></td><td>{f.effective_date||"—"}</td><td>{f.source||"—"}</td><td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Btn onClick={()=>showAudit(f)}>History</Btn>{isStaff&&f.status==="approved"&&<><Btn onClick={()=>startEdit(f)} disabled={saving}><Check size={12}/> Edit</Btn><Btn onClick={()=>withdrawFact(f)} disabled={saving}><Trash2 size={12}/> Withdraw</Btn></>}</div></td></tr>)}
+      </tbody></table></div>{!loading&&!facts.length&&<p className="table-foot">No facts returned by the backend. Select a brand or load demo facts.</p>}
+      <p className="table-foot">{isStaff?"Only the owning Reviewer can add, edit, or withdraw facts. Withdrawn and superseded records remain available for audit.":"Read-only view. Only the owning Reviewer can change facts."}</p>
+    </section>
+    {auditFact&&<section className="panel" style={{padding:18,marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}><h3 style={{margin:0}}>Audit history · {auditFact.key}</h3><Btn onClick={()=>setAuditFact(null)}><X size={14}/> Close</Btn></div>
+      {auditError&&<p className="disclaimer"><AlertTriangle size={14}/>{auditError}</p>}{!auditError&&!auditEvents.length&&<p className="table-foot">No audit events are recorded for this fact.</p>}
+      {auditEvents.map(event=><div key={event.id} style={{borderTop:"1px solid rgba(140,150,170,.2)",padding:"12px 0",fontSize:12}}><b>{event.action}</b> · {event.actor} · {new Date(event.created_at).toLocaleString()}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginTop:8}}><div><small>BEFORE</small><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(event.before,null,2)}</pre></div><div><small>AFTER</small><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{JSON.stringify(event.after,null,2)}</pre></div></div>
+      </div>)}
+    </section>}
+  </motion.section>;
+}
+
 export default function App(){
 
 const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=sessionStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>sessionStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>sessionStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>sessionStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false),[notificationOpen,setNotificationOpen]=useState(false),[readNotificationIds,setReadNotificationIds]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`bl-notifications-read:${sessionStorage.getItem("bl-username")||"guest"}:${sessionStorage.getItem("bl-is-staff")==="true"?"reviewer":"creator"}`)||"[]")}catch{return []}});
@@ -781,7 +862,72 @@ return <div className={`app theme-${theme}`}>
       <span style={{flex:1,minWidth:0}}><b style={{display:"block",fontSize:"12px"}}>{label}</b><small style={{display:"block",fontSize:"10px",marginTop:"2px",color:"#9da8bd"}}>{desc}</small></span>
       <ChevronDown size={13} style={{transform:"rotate(-90deg)",color:"#8792a9"}}/>
     </button>)}
-    <button onClick={()=>{setWorkspaceOpen(false);setToast("PayNest is the only workspace configured in this local demo. Multi-workspace switching can be added when separate workspaces are supported.")}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px",width:"100%",marginTop:"8px",padding:"10px",border:"1px solid #3b4356",borderRadius:"9px",background:"rgba(255,255,255,.025)",color:"#dce3f3",fontSize:"12px",fontWeight:700,cursor:"pointer"}}><Settings2 size={14}/> Workspace details <ArrowUpRight size={13}/></button>
+<div style={{ marginTop: 12 }}>
+  <label
+    htmlFor="workspace-brand-selector"
+    style={{
+      display: "block",
+      fontSize: 10,
+      fontWeight: 800,
+      letterSpacing: "1px",
+      color: "#8d98ae",
+      marginBottom: 7,
+    }}
+  >
+    SWITCH WORKSPACE
+  </label>
+
+  <select
+    id="workspace-brand-selector"
+    value={selectedBrandId}
+    onChange={(e) => {
+      const brandId = e.target.value;
+
+      setSelectedBrandId(brandId);
+      sessionStorage.setItem("bl-brand-id", brandId);
+
+      // Keep the Brand Guidelines page aligned with the workspace.
+      setGuidelineBrandId(brandId);
+      sessionStorage.setItem("bl-guideline-brand-id", brandId);
+
+      setWorkspaceOpen(false);
+      setToast(
+        `Workspace switched to ${
+          brands.find((brand) => String(brand.id) === brandId)?.name
+          || "selected brand"
+        }.`
+      );
+    }}
+    style={{
+      width: "100%",
+      padding: 10,
+      border: "1px solid #3b4356",
+      borderRadius: 9,
+      background: "#171c27",
+      color: "#dce3f3",
+      fontSize: 12,
+    }}
+  >
+    <option value="">Select a workspace</option>
+
+    {brands.map((brand) => (
+      <option key={brand.id} value={String(brand.id)}>
+        {brand.name}
+      </option>
+    ))}
+  </select>
+
+  <small
+    style={{
+      display: "block",
+      marginTop: 7,
+      color: "#9da8bd",
+      fontSize: 10,
+    }}
+  >
+    Select a brand to update your workspace.
+  </small>
+</div>
   </div>}
 </div><div className="nav-label">WORKSPACE</div>{visibleNav.filter(([id])=>["overview","reviews"].includes(id)).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}{visibleNav.some(([id])=>!["overview","reviews"].includes(id))&&<><div className="nav-label spaced">{isStaff?"GOVERNANCE":"REFERENCE"}</div>{visibleNav.filter(([id])=>!["overview","reviews"].includes(id)).map(([id,label,Icon])=><button key={id} className={`nav-item ${page===id?"active":""}`} onClick={()=>{setPage(id);setMobile(false)}}><Icon size={17}/>{label}</button>)}</>}<div className="sidebar-bottom"><div className="secure-note"><LockKeyhole size={15}/><span><b>Human-led review</b><small>Nothing publishes automatically.</small></span></div></div></aside>
 
@@ -879,7 +1025,7 @@ return <div className={`app theme-${theme}`}>
 {isStaff&&backendDraftId&&<section className="panel decision"><div className="decision-copy"><span><ShieldCheck size={19}/></span><div><b>Reviewer decision</b><small>Leave a clear comment, then approve, reject, or request changes. The creator owns the text edits.</small></div></div><div className="decision-actions"><input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Reviewer comment (required for reject or request changes)…"/><Btn kind="reject" disabled={status==="Approved"} onClick={()=>decide("rejected")}><ThumbsDown size={14}/> Reject</Btn><Btn disabled={status==="Approved"} onClick={()=>decide("changes-requested")}><ArrowRight size={14}/> Request changes</Btn><Btn kind="approve" disabled={status==="Approved"} onClick={()=>decide("approved")}><ThumbsUp size={14}/> Approve draft</Btn></div>{decision&&<p className="decision-note"><CheckCheck size={14}/> Reviewer decision saved to the backend: <b>{decision.replaceAll("-"," ")}</b>.</p>}</section>}</motion.section>}
 
 
-{page==="claims"&&<motion.section key="claims" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> REFERENCE / APPROVED FACTS</div><h1>Claims ledger</h1><p>Approved and historical product facts loaded from the Django knowledge API.</p></div><Btn onClick={()=>{setKnowledgeLoading(true);api.knowledge(selectedBrandId||null).then(data=>setKnowledgeData({facts:Array.isArray(data?.facts)?data.facts:[],rules:Array.isArray(data?.rules)?data.rules:[]})).catch(error=>setKnowledgeError(error.message||"Could not load brand knowledge.")).finally(()=>setKnowledgeLoading(false));}} disabled={knowledgeLoading}><RefreshCw size={14}/> Refresh facts</Btn></div><div className="intro-card"><Layers3 size={24}/><span><b>Verified facts, with a history</b><small>Only approved facts are used by the review engine. Superseded facts remain visible for traceability.</small></span><Pill>{knowledgeData.facts.length} facts</Pill></div>{knowledgeError&&<p className="disclaimer"><AlertTriangle size={14}/>{knowledgeError}</p>}<section className="panel table"><div className="table-head"><b>Approved and historical facts</b><span>{knowledgeLoading?"LOADING…":"LIVE BACKEND DATA"}</span></div><div className="table-scroll"><table><thead><tr><th>FACT</th><th>APPROVED VALUE</th><th>STATUS</th><th>EFFECTIVE DATE</th><th>SOURCE</th></tr></thead><tbody>{knowledgeData.facts.map(fact=><tr key={fact.id}><td><b>{fact.key}</b></td><td>{fact.value}</td><td><Pill tone={fact.status==="approved"?"good":""}>{fact.status}</Pill></td><td>{fact.effective_date||"—"}</td><td>{fact.source||"—"}</td></tr>)}</tbody></table></div>{!knowledgeLoading&&!knowledgeData.facts.length&&<p className="table-foot">No facts were returned by the backend. Run <code>python manage.py seed_demo</code> to load the fictional PayNest demo facts.</p>}<p className="table-foot">Fact editing is intentionally not offered in this view; manage approved knowledge through the authenticated Django admin until an audited editor is implemented.</p></section></motion.section>}
+{page==="claims"&&<ClaimsLedgerView isStaff={isStaff} selectedBrandId={selectedBrandId}/>}
 
 {page==="guidelines"&&<motion.section key="guidelines" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / RULEBOOK</div><h1>Brand guidelines</h1><p>{isStaff?"Manage the guidelines for your brands. Creators see these as read-only instructions.":"View the guidelines supplied by the brand owner. Guideline editing is reserved for Reviewers."}</p></div><Btn onClick={()=>reloadKnowledge()} disabled={guidelineKnowledgeLoading}><RefreshCw size={14}/> Refresh rules</Btn></div>
 <div className="panel" style={{padding:18,marginBottom:18}}><div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}><label style={{fontWeight:700}}>Selected brand</label><select value={guidelineBrandId} onChange={e=>{setGuidelineBrandId(e.target.value);sessionStorage.setItem("bl-guideline-brand-id",e.target.value);reloadKnowledge(e.target.value);setEditingGuidelineId(null);}} style={{minWidth:180,padding:10,borderRadius:8}}><option value="">Select a brand</option>{brands.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></div></div>
