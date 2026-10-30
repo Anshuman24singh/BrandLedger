@@ -73,6 +73,12 @@ function mapBackendFindings(items){
         source: f.source || "Backend rulebook",
         suggestion: f.suggestion || "Review and revise this claim.",
         state: f.state || "open",
+
+        // Preserve the backend's evidence trace for the reviewer detail panel.
+        evidenceStatus: f.evidence_status || "uncertain",
+        evidenceSnapshot: f.evidence_snapshot || {},
+        factId: f.fact ?? f.fact_id ?? null,
+        ruleId: f.rule ?? f.rule_id ?? null,
       };
     });
 }
@@ -846,7 +852,29 @@ return <div className={`app theme-${theme}`}>
 {showEvidence&&<aside className="panel evidence"><div className="panel-head"><div><h3>Review findings <span className="count">{open.length}</span></h3><p>{findings.length?`${resolved.length} of ${findings.length} addressed`:"Run a review to see evidence-backed findings."}</p></div><button title="Reverse finding order" aria-label="Reverse finding order" onClick={()=>setFindings(f=>[...f].reverse())}><Filter size={15}/></button></div>{findings.length>0&&<div className="progress"><span>Resolution progress <b>{completion}%</b></span><div><i style={{width:completion+"%"}}/></div></div>}{!findings.length?<div className="empty"><span><ShieldCheck size={29}/><Sparkles size={13}/></span><b>{isStaff?(backendDraftId?"No findings returned for this draft":"Choose a submission to begin") : "Your evidence panel is ready"}</b><p>{isStaff?(backendDraftId?"No findings were returned for this saved submission.":"Open a submitted draft above to inspect its findings."):"Run a review to see each issue, the source rule, and a suggested next step."}</p><small>✓ Approved facts　 ✓ Prohibited phrases　 ✓ Claim evidence</small></div>:<div className="finding-list">{findings.map((f,i)=><motion.button key={f.id} className={`finding ${active===f.id?"selected":""} ${resolved.includes(f.id)?"resolved":""}`} onClick={()=>setActive(f.id)} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:i*.06}}><span className={`finding-icon ${f.severity}`}>{f.severity==="critical"?<ShieldAlert size={16}/>:<Flag size={16}/>}</span><span className="finding-body"><small>{f.type}<b className={f.severity}>{resolved.includes(f.id)?"RESOLVED":f.severity.toUpperCase()}</b></small><strong>{f.title}</strong><em>{f.detail}</em><label><BookOpen size={12}/>{f.source}</label></span><ChevronRight size={14}/></motion.button>)}</div>}
 
 
-{activeFinding&&<AnimatePresence mode="wait"><motion.div key={activeFinding.id} className="evidence-detail" initial={{opacity:0,y:7}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="detail-kicker"><BookOpen size={13}/> EVIDENCE & EXPLANATION <b className={activeFinding.severity}>{activeFinding.severity.toUpperCase()}</b></div><h4>{activeFinding.title}</h4><p>{activeFinding.detail}</p><div className="source-card"><BadgeCheck size={16}/><span><small>TRACEABLE SOURCE</small><b>{activeFinding.source}</b><em>{activeFinding.kind==="fact_mismatch"?"Approved fact returned by the backend: "+activeFinding.source:"Rule source returned by the backend: "+activeFinding.source}</em></span></div><div className="suggestion"><small><Sparkles size={13}/> SUGGESTED NEXT STEP</small><p>{activeFinding.suggestion}</p>{!isStaff&&isUsableSuggestion(activeFinding.suggestion)&&activeFinding.source!=="Human review required"&&<div><Btn kind="primary" disabled={busy || resolved.includes(activeFinding.id)} onClick={()=>apply(activeFinding)}><Check size={14}/> Apply suggestion</Btn></div>}{!isStaff&&(!isUsableSuggestion(activeFinding.suggestion)||activeFinding.source==="Human review required")&&<p style={{fontSize:12,opacity:.8,marginTop:8}}>No safe, evidence-backed replacement is available. Human review is required; this text cannot be applied automatically.</p>}</div></motion.div></AnimatePresence>}<div className="evidence-foot"><LockKeyhole size={12}/> Suggestions never publish automatically</div></aside>}</div>
+{activeFinding&&<AnimatePresence mode="wait"><motion.div key={activeFinding.id} className="evidence-detail" initial={{opacity:0,y:7}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="detail-kicker"><BookOpen size={13}/> EVIDENCE & EXPLANATION <b className={activeFinding.severity}>{activeFinding.severity.toUpperCase()}</b></div><h4>{activeFinding.title}</h4><p>{activeFinding.detail}</p><div className="source-card">
+  <BadgeCheck size={16}/>
+  <span>
+    <small>TRACEABLE SOURCE</small>
+    <b>{activeFinding.source}</b>
+    <em>
+      {activeFinding.evidenceStatus === "supported"
+        ? "The backend marked this evidence as supported."
+        : "Evidence is uncertain or has not been verified. Treat this finding as requiring human review."}
+    </em>
+    {activeFinding.factId != null && <em>Linked fact record ID: {activeFinding.factId}</em>}
+    {activeFinding.ruleId != null && <em>Linked rule record ID: {activeFinding.ruleId}</em>}
+    {activeFinding.factId == null && activeFinding.ruleId == null && (
+      <em>No exact fact or rule record is linked to this finding.</em>
+    )}
+    {activeFinding.evidenceSnapshot &&
+      Object.keys(activeFinding.evidenceSnapshot).length > 0 && (
+        <pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",fontSize:11,lineHeight:1.5,margin:"8px 0 0",padding:10,borderRadius:8,background:"rgba(127,152,232,.08)"}}>
+          {JSON.stringify(activeFinding.evidenceSnapshot, null, 2)}
+        </pre>
+      )}
+  </span>
+</div><div className="suggestion"><small><Sparkles size={13}/> SUGGESTED NEXT STEP</small><p>{activeFinding.suggestion}</p>{!isStaff&&isUsableSuggestion(activeFinding.suggestion)&&activeFinding.source!=="Human review required"&&<div><Btn kind="primary" disabled={busy || resolved.includes(activeFinding.id)} onClick={()=>apply(activeFinding)}><Check size={14}/> Apply suggestion</Btn></div>}{!isStaff&&(!isUsableSuggestion(activeFinding.suggestion)||activeFinding.source==="Human review required")&&<p style={{fontSize:12,opacity:.8,marginTop:8}}>No safe, evidence-backed replacement is available. Human review is required; this text cannot be applied automatically.</p>}</div></motion.div></AnimatePresence>}<div className="evidence-foot"><LockKeyhole size={12}/> Suggestions never publish automatically</div></aside>}</div>
 
 {isStaff&&backendDraftId&&<section className="panel decision"><div className="decision-copy"><span><ShieldCheck size={19}/></span><div><b>Reviewer decision</b><small>Leave a clear comment, then approve, reject, or request changes. The creator owns the text edits.</small></div></div><div className="decision-actions"><input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Reviewer comment (required for reject or request changes)…"/><Btn kind="reject" disabled={status==="Approved"} onClick={()=>decide("rejected")}><ThumbsDown size={14}/> Reject</Btn><Btn disabled={status==="Approved"} onClick={()=>decide("changes-requested")}><ArrowRight size={14}/> Request changes</Btn><Btn kind="approve" disabled={status==="Approved"} onClick={()=>decide("approved")}><ThumbsUp size={14}/> Approve draft</Btn></div>{decision&&<p className="decision-note"><CheckCheck size={14}/> Reviewer decision saved to the backend: <b>{decision.replaceAll("-"," ")}</b>.</p>}</section>}</motion.section>}
 
