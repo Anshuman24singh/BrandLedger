@@ -59,6 +59,9 @@ export const api = {
 
     sessionStorage.setItem(TOKEN_KEY, data.token);
     sessionStorage.setItem("bl-username", data.username || username);
+    if (data.user_id != null) {
+      sessionStorage.setItem("bl-user-id", String(data.user_id));
+    }
     sessionStorage.setItem(
       "bl-is-staff",
       String(Boolean(data.is_staff))
@@ -73,12 +76,14 @@ export const api = {
     } finally {
       sessionStorage.removeItem(TOKEN_KEY);
       sessionStorage.removeItem("bl-username");
+      sessionStorage.removeItem("bl-user-id");
       sessionStorage.removeItem("bl-is-staff");
     }
   },
 
-  listDrafts() {
-    return request("/drafts/");
+  listDrafts(brandId = null) {
+    const query = brandId ? `?brand_id=${encodeURIComponent(brandId)}` : "";
+    return request(`/drafts/${query}`);
   },
 
   getDraft(id) {

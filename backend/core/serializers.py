@@ -44,6 +44,7 @@ class DecisionSerializer(serializers.ModelSerializer):
 
 
 class DraftSerializer(serializers.ModelSerializer):
+    author_id = serializers.IntegerField(source="author.id", read_only=True)
     author_name = serializers.CharField(source="author.username", read_only=True)
     brand_name = serializers.CharField(source="brand.name", read_only=True)
     findings = FindingSerializer(many=True, read_only=True)
@@ -60,6 +61,7 @@ class DraftSerializer(serializers.ModelSerializer):
             "content",
             "status",
             "ai_review_complete",
+            "author_id",
             "author_name",
             "created_at",
             "updated_at",
