@@ -1,3 +1,4 @@
+
 import json
 import os
 import re
@@ -5,6 +6,8 @@ import re
 from groq import Groq
 
 from .models import Fact, Rule
+
+
 class AIReviewError(Exception):
     """Raised when AI review cannot be completed reliably."""
 
@@ -13,23 +16,34 @@ def _is_instructional_suggestion(value):
     """Return True when text describes an action instead of replacement copy."""
     if not isinstance(value, str) or not value.strip():
         return True
+
     text = re.sub(r"\s+", " ", value).strip().casefold()
+
     if text == "human review required":
         return True
+
     patterns = (
         r"^(please\s+)?(remove|delete|replace|rewrite|change|avoid|describe|explain|ask|consider|ensure|make sure|try|substantiate|verify|confirm|check)\b",
         r"^(this|the) (phrase|claim|text|sentence|wording)\b",
         r"\b(review|revise) this (claim|phrase|text|sentence)\b",
         r"\bapproved wording\b",
     )
+
     return any(re.search(pattern, text) for pattern in patterns)
 
 
 def deterministic_inspect(content, brand_id=None):
-    """Run existing rule and approved-fact checks without using AI."""
+    """Run deterministic checks and retain the exact supporting evidence."""
     findings = []
 
-    for rule in Rule.objects.filter(brand_id=brand_id) if brand_id else Rule.objects.filter(brand__isnull=True):
+    rules = (
+        Rule.objects.filter(brand_id=brand_id)
+        if brand_id
+        else Rule.objects.filter(brand__isnull=True)
+    )
+
+    # Check prohibited phrases against the actual Rule records.
+    for rule in rules:
         for match in re.finditer(re.escape(rule.phrase), content, re.I):
             findings.append({
                 "kind": "prohibited_term",
@@ -41,9 +55,36 @@ def deterministic_inspect(content, brand_id=None):
                     else "Human review required"
                 ),
                 "source": f"{rule.code}: {rule.source}",
+                "rule_id": rule.id,
+                "evidence_status": "supported",
+                "evidence_snapshot": {
+                    "type": "rule",
+                    "record_id": rule.id,
+                    "code": rule.code,
+                    "phrase": rule.phrase,
+                    "replacement": rule.replacement,
+                    "explanation": rule.explanation,
+                    "source": rule.source,
+                },
             })
 
-    for fact in Fact.objects.filter(status="approved", brand_id=brand_id) if brand_id else Fact.objects.filter(status="approved", brand__isnull=True):
+    facts = (
+        Fact.objects.filter(status="approved", brand_id=brand_id)
+        if brand_id
+        else Fact.objects.filter(status="approved", brand__isnull=True)
+    )
+
+    # Group approved facts by key so conflicting values are not
+    # silently treated as authoritative evidence.
+    facts_by_key = {}
+
+    for fact in facts:
+        facts_by_key.setdefault(
+            fact.key.strip().casefold(), []
+        ).append(fact)
+
+    for key_facts in facts_by_key.values():
+        fact = key_facts[0]
         key = fact.key.strip()
 
         pattern = (
@@ -52,16 +93,47 @@ def deterministic_inspect(content, brand_id=None):
             rf"(\d+(?:\.\d+)?\s*%?)"
         )
 
+        distinct_values = {
+            re.sub(r"\s+", "", item.value).casefold()
+            for item in key_facts
+        }
+
+        conflicting = len(distinct_values) > 1
+
         for match in re.finditer(pattern, content, re.I):
             observed = re.sub(r"\s+", "", match.group(1))
             expected = re.sub(r"\s+", "", fact.value)
 
+            if conflicting:
+                findings.append({
+                    "kind": "fact_mismatch",
+                    "excerpt": match.group(1),
+                    "reason": (
+                        f"Multiple approved facts for {key} have conflicting "
+                        "values. Human review is required."
+                    ),
+                    "suggestion": "Human review required",
+                    "source": "Human review required",
+                    "evidence_status": "uncertain",
+                    "evidence_snapshot": {
+                        "type": "conflicting_facts",
+                        "key": key,
+                        "records": [
+                            {
+                                "record_id": item.id,
+                                "value": item.value,
+                                "source": item.source,
+                            }
+                            for item in key_facts
+                        ],
+                    },
+                })
+                continue
+
             if observed != expected:
                 findings.append({
                     "kind": "fact_mismatch",
-                    # Replace only the mismatched value, not the whole key/value
-                    # phrase. This keeps the suggestion grammatical and makes the
-                    # frontend's exact-excerpt replacement deterministic.
+                    # Replace only the mismatched value.
                     "excerpt": match.group(1),
                     "reason": (
                         f"Current approved {key} is {fact.value}; "
@@ -69,14 +141,27 @@ def deterministic_inspect(content, brand_id=None):
                     ),
                     "suggestion": fact.value,
                     "source": f"{fact.key}: {fact.source}",
+                    "fact_id": fact.id,
+                    "evidence_status": "supported",
+                    "evidence_snapshot": {
+                        "type": "fact",
+                        "record_id": fact.id,
+                        "key": fact.key,
+                        "value": fact.value,
+                        "source": fact.source,
+                        "effective_date": (
+                            fact.effective_date.isoformat()
+                            if fact.effective_date
+                            else None
+                        ),
+                    },
                 })
 
     return findings
 
 
-
 def groq_inspect(content, brand_id=None):
-    """Find semantic brand-governance issues using Groq and approved context."""
+    """Find semantic governance issues and link citations to exact records."""
 
     api_key = os.environ.get("GROQ_API_KEY")
     model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
@@ -86,10 +171,33 @@ def groq_inspect(content, brand_id=None):
             "GROQ_API_KEY is not configured; cannot perform AI review."
         )
 
-    fact_qs = Fact.objects.filter(status="approved", brand_id=brand_id) if brand_id else Fact.objects.filter(status="approved", brand__isnull=True)
-    rule_qs = Rule.objects.filter(brand_id=brand_id) if brand_id else Rule.objects.filter(brand__isnull=True)
-    facts = list(fact_qs.values("key", "value", "source"))
-    rules = list(rule_qs.values("code", "phrase", "replacement", "explanation", "source"))
+    fact_qs = (
+        Fact.objects.filter(status="approved", brand_id=brand_id)
+        if brand_id
+        else Fact.objects.filter(status="approved", brand__isnull=True)
+    )
+
+    rule_qs = (
+        Rule.objects.filter(brand_id=brand_id)
+        if brand_id
+        else Rule.objects.filter(brand__isnull=True)
+    )
+
+    # Include database IDs so AI citations can be resolved to exact records.
+    facts = list(
+        fact_qs.values("id", "key", "value", "source")
+    )
+
+    rules = list(
+        rule_qs.values(
+            "id",
+            "code",
+            "phrase",
+            "replacement",
+            "explanation",
+            "source",
+        )
+    )
 
     prompt = f"""
 Analyze this draft for brand-governance issues:
@@ -118,7 +226,12 @@ Constraints:
   set suggestion to the exact text "Human review required". Do not suggest
   that this placeholder be inserted into the draft.
 - Cite a supplied fact or rule only if it genuinely supports the finding.
-- Otherwise use "Human review required" as the source.
+- For a citation, copy the exact source label from the supplied record:
+  Fact: "key: source"
+  Rule: "code: source"
+- Do not invent or modify source labels.
+- If no supplied record genuinely supports the finding, use
+  "Human review required" as the source.
 - Return valid JSON only in this format:
 {{
   "findings": [
@@ -127,7 +240,7 @@ Constraints:
       "excerpt": "exact text from draft",
       "reason": "concise explanation",
       "suggestion": "exact replacement text for the flagged excerpt",
-      "source": "actual supplied source or Human review required"
+      "source": "exact supplied source label or Human review required"
     }}
   ]
 }}
@@ -155,50 +268,78 @@ DRAFT:
                 {
                     "role": "system",
                     "content": (
-                    "You are BrandLedger's brand-governance reviewer. "
-                    "Follow the supplied analysis constraints and return "
-                    "valid JSON only. Do not include markdown fences."
+                        "You are BrandLedger's brand-governance reviewer. "
+                        "Follow the supplied analysis constraints and return "
+                        "valid JSON only. Do not include markdown fences."
                     ),
                 },
                 {
                     "role": "user",
                     "content": prompt,
                 },
-          ],
-          temperature=0.1,
-          max_completion_tokens=2000,
-          response_format={"type": "json_object"},
-      )
+            ],
+            temperature=0.1,
+            max_completion_tokens=2000,
+            response_format={"type": "json_object"},
+        )
 
-        response_text = (response.choices[0].message.content or "").strip()
+        response_text = (
+            response.choices[0].message.content or ""
+        ).strip()
+
         # Be tolerant of Markdown fences while still requiring valid JSON.
         if response_text.startswith("```"):
-            response_text = re.sub(r"^```(?:json)?\s*", "", response_text, flags=re.I)
-            response_text = re.sub(r"\s*```$", "", response_text)
+            response_text = re.sub(
+                r"^```(?:json)?\s*",
+                "",
+                response_text,
+                flags=re.I,
+            )
+            response_text = re.sub(
+                r"\s*```$",
+                "",
+                response_text,
+            )
+
         data = json.loads(response_text)
+
         if not isinstance(data, dict):
             raise ValueError("AI response must be a JSON object.")
+
         if "findings" not in data:
             raise ValueError("AI response is missing the findings field.")
 
         raw_findings = data["findings"]
+
         if not isinstance(raw_findings, list):
             raise ValueError("AI response findings must be a list.")
 
-        valid_sources = {
-            f"{fact['key']}: {fact['source']}"
-            for fact in facts
-        } | {
-            f"{rule['code']}: {rule['source']}"
-            for rule in rules
-        }
+        # Map source labels to actual database records.
+        # If a label maps to multiple records, it is ambiguous.
+        source_records = {}
+
+        for fact in facts:
+            label = f"{fact['key']}: {fact['source']}"
+            source_records.setdefault(label, []).append({
+                "type": "fact",
+                "record": fact,
+            })
+
+        for rule in rules:
+            label = f"{rule['code']}: {rule['source']}"
+            source_records.setdefault(label, []).append({
+                "type": "rule",
+                "record": rule,
+            })
 
         findings = []
         allowed_kinds = {"unsupported_claim", "brand_tone"}
 
         for item in raw_findings:
             if not isinstance(item, dict):
-                raise ValueError("Each AI finding must be a JSON object.")
+                raise ValueError(
+                    "Each AI finding must be a JSON object."
+                )
 
             kind = item.get("kind")
             excerpt = item.get("excerpt")
@@ -222,14 +363,67 @@ DRAFT:
                     "AI finding excerpt does not exactly match the draft."
                 )
 
-            if source != "Human review required" and source not in valid_sources:
+            # Resolve the cited source to exactly one real database record.
+            matching_records = source_records.get(source, [])
+
+            fact_id = None
+            rule_id = None
+            evidence_snapshot = {}
+            evidence_status = "uncertain"
+
+            if len(matching_records) == 1:
+                matched = matching_records[0]
+                record = matched["record"]
+
+                if matched["type"] == "fact":
+                    fact_id = record["id"]
+                    evidence_snapshot = {
+                        "type": "fact",
+                        "record_id": record["id"],
+                        "key": record["key"],
+                        "value": record["value"],
+                        "source": record["source"],
+                    }
+                    evidence_status = "supported"
+
+                elif matched["type"] == "rule":
+                    rule_id = record["id"]
+                    evidence_snapshot = {
+                        "type": "rule",
+                        "record_id": record["id"],
+                        "code": record["code"],
+                        "phrase": record["phrase"],
+                        "replacement": record["replacement"],
+                        "explanation": record["explanation"],
+                        "source": record["source"],
+                    }
+                    evidence_status = "supported"
+
+            elif len(matching_records) > 1:
+                evidence_snapshot = {
+                    "type": "ambiguous_source",
+                    "source_label": source,
+                    "matching_record_ids": [
+                        entry["record"]["id"]
+                        for entry in matching_records
+                    ],
+                }
+
+            else:
+                evidence_snapshot = {
+                    "type": "unverified_source",
+                    "source_label": source,
+                }
+
+            if evidence_status == "uncertain":
                 source = "Human review required"
+                suggestion = "Human review required"
+
             if _is_instructional_suggestion(suggestion):
                 suggestion = "Human review required"
-            # A replacement is actionable only when it is backed by an actual
-            # supplied fact/rule. A placeholder source means the evidence is
-            # not traceable, so require a human rather than showing Apply.
-            if source == "Human review required":
+
+            # A placeholder suggestion must never be applied as draft copy.
+            if suggestion == "Human review required":
                 suggestion = "Human review required"
 
             findings.append({
@@ -238,6 +432,10 @@ DRAFT:
                 "reason": reason,
                 "suggestion": suggestion,
                 "source": source,
+                "fact_id": fact_id,
+                "rule_id": rule_id,
+                "evidence_status": evidence_status,
+                "evidence_snapshot": evidence_snapshot,
             })
 
         return findings
@@ -246,7 +444,8 @@ DRAFT:
         print("Groq analysis failed:", type(exc).__name__, str(exc))
         raise AIReviewError(
             "AI review failed. Please try again later."
-          ) from exc
+        ) from exc
+
 
 def inspect(content, brand_id=None):
     """Combine deterministic checks with AI findings while avoiding duplicates."""
@@ -265,7 +464,6 @@ def inspect(content, brand_id=None):
         if not first_text or not second_text:
             return False
 
-        # Exact match or one excerpt contained in the other.
         return (
             first_text == second_text
             or first_text in second_text
@@ -276,34 +474,70 @@ def inspect(content, brand_id=None):
         duplicate = False
 
         for existing_finding in findings:
-            # Suppress AI findings that describe the same issue
-            # already identified by deterministic checks.
             same_prohibited_issue = (
                 existing_finding["kind"] == "prohibited_term"
-                and ai_finding["kind"] in {"brand_tone", "unsupported_claim"}
-                and overlaps(existing_finding["excerpt"], ai_finding["excerpt"])
+                and ai_finding["kind"] in {
+                    "brand_tone",
+                    "unsupported_claim",
+                }
+                and overlaps(
+                    existing_finding["excerpt"],
+                    ai_finding["excerpt"],
+                )
             )
+
             same_fact_issue = (
                 existing_finding["kind"] == "fact_mismatch"
                 and ai_finding["kind"] == "unsupported_claim"
-                and overlaps(existing_finding["excerpt"], ai_finding["excerpt"])
+                and overlaps(
+                    existing_finding["excerpt"],
+                    ai_finding["excerpt"],
+                )
             )
-            # Some AI explanations quote a rule code while describing the claim
-            # in different words. Prefer the deterministic, source-backed rule
-            # finding instead of showing a duplicate placeholder finding.
-            existing_source = str(existing_finding.get("source", ""))
-            rule_code = existing_source.split(":", 1)[0].strip() if existing_finding["kind"] == "prohibited_term" else ""
+
+            existing_source = str(
+                existing_finding.get("source", "")
+            )
+
+            rule_code = (
+                existing_source.split(":", 1)[0].strip()
+                if existing_finding["kind"] == "prohibited_term"
+                else ""
+            )
+
             same_rule_issue = bool(
                 rule_code
-                and ai_finding["kind"] in {"brand_tone", "unsupported_claim"}
-                and (rule_code.casefold() in str(ai_finding.get("reason", "")).casefold()
-                     or rule_code.casefold() in str(ai_finding.get("source", "")).casefold())
+                and ai_finding["kind"] in {
+                    "brand_tone",
+                    "unsupported_claim",
+                }
+                and (
+                    rule_code.casefold()
+                    in str(ai_finding.get("reason", "")).casefold()
+                    or rule_code.casefold()
+                    in str(ai_finding.get("source", "")).casefold()
+                )
             )
-            if same_prohibited_issue or same_fact_issue or same_rule_issue:
-                # Preserve the deterministic finding, but borrow the AI's
-                # usable replacement if the stored rule only has instructions.
-                if _is_instructional_suggestion(existing_finding.get("suggestion")) and not _is_instructional_suggestion(ai_finding.get("suggestion")):
-                    existing_finding["suggestion"] = ai_finding["suggestion"]
+
+            if (
+                same_prohibited_issue
+                or same_fact_issue
+                or same_rule_issue
+            ):
+                # Keep the deterministic finding and its exact evidence link.
+                # Borrow an AI replacement only if it is usable.
+                if (
+                    _is_instructional_suggestion(
+                        existing_finding.get("suggestion")
+                    )
+                    and not _is_instructional_suggestion(
+                        ai_finding.get("suggestion")
+                    )
+                ):
+                    existing_finding["suggestion"] = (
+                        ai_finding["suggestion"]
+                    )
+
                 duplicate = True
                 break
 

@@ -45,15 +45,49 @@ class Version(models.Model):
  editor=models.ForeignKey(User,on_delete=models.PROTECT)
  created_at=models.DateTimeField(auto_now_add=True)
  class Meta:unique_together=[('draft','version')]
+
 class Finding(models.Model):
- draft=models.ForeignKey(Draft,on_delete=models.CASCADE,related_name='findings')
- version=models.ForeignKey(Version,on_delete=models.CASCADE)
- kind=models.CharField(max_length=50)
- excerpt=models.CharField(max_length=300)
- reason=models.TextField()
- suggestion=models.TextField(blank=True)
- source=models.CharField(max_length=300)
- state=models.CharField(max_length=20,default='open')
+    EVIDENCE_STATUS_CHOICES = [
+        ("supported", "Supported"),
+        ("uncertain", "Uncertain"),
+    ]
+
+    draft = models.ForeignKey(
+        Draft,
+        on_delete=models.CASCADE,
+        related_name="findings",
+    )
+    version = models.ForeignKey(Version, on_delete=models.CASCADE)
+
+    fact = models.ForeignKey(
+        Fact,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="findings",
+    )
+    rule = models.ForeignKey(
+        Rule,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="findings",
+    )
+
+    evidence_status = models.CharField(
+        max_length=20,
+        choices=EVIDENCE_STATUS_CHOICES,
+        default="uncertain",
+    )
+    evidence_snapshot = models.JSONField(default=dict, blank=True)
+
+    kind = models.CharField(max_length=50)
+    excerpt = models.CharField(max_length=300)
+    reason = models.TextField()
+    suggestion = models.TextField(blank=True)
+    source = models.CharField(max_length=300)
+    state = models.CharField(max_length=20, default="open")
+
 class Decision(models.Model):
  draft=models.ForeignKey(Draft,on_delete=models.CASCADE,related_name='decisions')
  finding=models.ForeignKey(Finding,on_delete=models.CASCADE,null=True,blank=True)
