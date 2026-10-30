@@ -385,7 +385,7 @@ function buildAuditEvents(savedDrafts) {
     const findingsById = new Map(
       (Array.isArray(draft.findings) ? draft.findings : []).map((finding) => [String(finding.id), finding]),
     );
-    const decisionEvents = (Array.isArray(draft.decisions) ? draft.decisions : []).map((decision) => ({
+    const decisionEvents = (Array.isArray(draft.decisions) ? draft.decisions : []).filter((decision) => decision.action !== "revised").map((decision) => ({
       ...decision,
       draftTitle: draft.title,
       draftId: draft.id,
