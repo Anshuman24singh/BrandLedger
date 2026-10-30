@@ -1,4 +1,3 @@
-
 from django.test import TestCase
 
 from core.models import Fact, Rule
@@ -50,6 +49,20 @@ class EvaluationDatasetTests(TestCase):
                 "actual_issue_kinds": actual_issue_kinds,
             })
 
+        # Check the exact issue types for every example.
+        # This catches wrong issue types as well as missing or extra findings.
+        for result in results:
+            with self.subTest(example_id=result["id"]):
+                self.assertCountEqual(
+                    result["expected_issue_kinds"],
+                    result["actual_issue_kinds"],
+                    msg=(
+                        f"Incorrect issue types for {result['id']}. "
+                        f"Expected: {result['expected_issue_kinds']}; "
+                        f"detected: {result['actual_issue_kinds']}"
+                    ),
+                )
+
         metrics = calculate_metrics(results)
 
         print("\nBRANDLEGDER DETERMINISTIC EVALUATION")
@@ -64,9 +77,20 @@ class EvaluationDatasetTests(TestCase):
         for metric, value in metrics.items():
             print(f"{metric}: {value}")
 
-        # This assertion ensures the evaluation actually ran
-        # against every labelled example.
-        self.assertEqual(metrics["total_examples"], len(EVALUATION_DATASET))
+        # Verify the expected example-level evaluation metrics.
+        self.assertEqual(
+            metrics,
+            {
+                "total_examples": 6,
+                "true_positives": 3,
+                "false_positives": 0,
+                "false_negatives": 0,
+                "true_negatives": 3,
+                "precision": 1.0,
+                "recall": 1.0,
+                "accuracy": 1.0,
+            },
+        )
 
     def test_metrics_detect_false_positives_and_missed_issues(self):
         metrics = calculate_metrics([
