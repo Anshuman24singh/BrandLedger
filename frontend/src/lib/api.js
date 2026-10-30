@@ -85,6 +85,10 @@ export const api = {
     return request(`/drafts/${encodeURIComponent(id)}/`);
   },
 
+  createFact(data) { return request("/facts/", { method: "POST", body: JSON.stringify(data) }); },
+  updateFact(id, data) { return request(`/facts/${encodeURIComponent(id)}/`, { method: "PATCH", body: JSON.stringify(data) }); },
+  deleteFact(id) { return request(`/facts/${encodeURIComponent(id)}/`, { method: "DELETE" }); },
+  factAudit(id) { return request(`/facts/${encodeURIComponent(id)}/audit/`); },
   knowledge(brandId = null) {
     return request(`/knowledge/${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`);
   },

@@ -12,9 +12,161 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Brand, Fact, Rule, Draft, Version, Finding, Decision
+from .models import Brand, Fact, Rule, Draft, Version, Finding, Decision, FactAudit
 from .serializers import BrandSerializer, FactSerializer, RuleSerializer, DraftSerializer
 from .engine import AIReviewError, deterministic_inspect, inspect
+
+def _fact_snapshot(fact):
+    return {
+        "id": fact.id,
+        "brand": fact.brand_id,
+        "key": fact.key,
+        "value": fact.value,
+        "source": fact.source,
+        "status": fact.status,
+        "effective_date": fact.effective_date.isoformat() if fact.effective_date else None,
+    }
+
+
+def _reviewer_owned_brand(request, brand_id):
+    """Return a brand for any authenticated Reviewer; ownership is not required."""
+    if not request.user.is_staff:
+        return None, Response({"error": "Reviewer permission required."}, status=status.HTTP_403_FORBIDDEN)
+    if not brand_id:
+        return None, Response({"error": "A brand is required."}, status=status.HTTP_400_BAD_REQUEST)
+    brand = get_object_or_404(Brand, pk=brand_id)
+    return brand, None
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def fact_collection(request):
+    brand, error = _reviewer_owned_brand(request, request.data.get("brand"))
+    if error:
+        return error
+    key = str(request.data.get("key", "")).strip()
+    value = str(request.data.get("value", "")).strip()
+    source = str(request.data.get("source", "")).strip()
+    effective_date = request.data.get("effective_date") or None
+    if not key or len(key) > 80 or not value or len(value) > 250 or not source or len(source) > 300:
+        return Response(
+            {"error": "Key (max 80), value (max 250), and source (max 300) are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    from django.utils.dateparse import parse_date
+    if effective_date:
+        effective_date = parse_date(str(effective_date))
+        if effective_date is None:
+            return Response({"error": "effective_date must use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        previous = list(
+            Fact.objects.select_for_update()
+            .filter(brand=brand, key__iexact=key, status="approved")
+            .order_by("id")
+        )
+        before = [_fact_snapshot(fact) for fact in previous]
+        for old_fact in previous:
+            old_fact.status = "superseded"
+            old_fact.save(update_fields=["status"])
+        fact = Fact.objects.create(
+            brand=brand, key=key, value=value, source=source,
+            status="approved", effective_date=effective_date,
+        )
+        FactAudit.objects.create(
+            fact=fact, brand=brand, actor=request.user,
+            action="replaced" if previous else "created",
+            before={"facts": before}, after=_fact_snapshot(fact),
+        )
+    from .serializers import FactSerializer
+    return Response(FactSerializer(fact).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def fact_detail(request, pk):
+    fact = get_object_or_404(Fact.objects.select_related("brand"), pk=pk)
+    if not fact.brand:
+        return Response({"error": "Only brand-linked facts can be changed here."}, status=status.HTTP_400_BAD_REQUEST)
+    brand, error = _reviewer_owned_brand(request, fact.brand_id)
+    if error:
+        return error
+    if fact.status != "approved":
+        return Response({"error": "Only currently approved facts can be edited or withdrawn."}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        fact = Fact.objects.select_for_update().get(pk=fact.pk)
+        before = _fact_snapshot(fact)
+        if request.method == "DELETE":
+            fact.status = "withdrawn"
+            fact.save(update_fields=["status"])
+            FactAudit.objects.create(
+                fact=fact, brand=brand, actor=request.user,
+                action="withdrawn", before=before,
+                after={**_fact_snapshot(fact), "withdrawn": True},
+            )
+            return Response({"id": fact.id, "status": fact.status}, status=status.HTTP_200_OK)
+
+        data = request.data
+        key = str(data.get("key", fact.key)).strip()
+        value = str(data.get("value", fact.value)).strip()
+        source = str(data.get("source", fact.source)).strip()
+        effective_date = data.get("effective_date", fact.effective_date)
+        if effective_date == "":
+            effective_date = None
+        if not key or len(key) > 80 or not value or len(value) > 250 or not source or len(source) > 300:
+            return Response({"error": "Key (max 80), value (max 250), and source (max 300) are required."}, status=status.HTTP_400_BAD_REQUEST)
+        from django.utils.dateparse import parse_date
+        if effective_date and not hasattr(effective_date, "isoformat"):
+            effective_date = parse_date(str(effective_date))
+            if effective_date is None:
+                return Response({"error": "effective_date must use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        overlapping = list(Fact.objects.select_for_update().filter(brand=brand, key__iexact=key, status="approved").exclude(pk=fact.pk).order_by("id"))
+        replacement_before = [_fact_snapshot(item) for item in [fact, *overlapping]]
+        fact.status = "superseded"
+        fact.save(update_fields=["status"])
+        for item in overlapping:
+            item.status = "superseded"
+            item.save(update_fields=["status"])
+        replacement = Fact.objects.create(
+            brand=brand, key=key, value=value, source=source,
+            status="approved", effective_date=effective_date,
+        )
+        FactAudit.objects.create(
+            fact=fact, brand=brand, actor=request.user, action="updated",
+            before={"facts": replacement_before}, after=_fact_snapshot(replacement),
+        )
+        FactAudit.objects.create(
+            fact=replacement, brand=brand, actor=request.user, action="created",
+            before={"replaced_fact_id": fact.id}, after=_fact_snapshot(replacement),
+        )
+
+    from .serializers import FactSerializer
+    return Response(FactSerializer(replacement).data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def fact_audit(request, pk):
+    fact = get_object_or_404(Fact.objects.select_related("brand"), pk=pk)
+    if not request.user.is_staff:
+        allowed = fact.brand and (
+            fact.brand.created_by_id == request.user.id
+            or fact.brand.members.filter(pk=request.user.pk).exists()
+        )
+        if not allowed:
+            return Response({"error": "You do not have access to this fact."}, status=status.HTTP_403_FORBIDDEN)
+    # Reviewers can inspect audit history for facts belonging to any brand.
+    events = FactAudit.objects.filter(fact=fact).select_related("actor").order_by("-created_at", "-id")
+    return Response([
+        {
+            "id": event.id, "action": event.action, "actor": event.actor.username,
+            "created_at": event.created_at.isoformat(), "before": event.before, "after": event.after,
+        }
+        for event in events
+    ])
+
 
 
 def accessible_drafts(user):
