@@ -1,4 +1,4 @@
-import React,{useState,useEffect,useRef}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
+import React,{useState,useEffect,useRef,useMemo}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
 
 const seed="";
 
@@ -123,6 +123,340 @@ function NotificationMenu({isStaff,open,setOpen,notifications,unreadCount,readId
   </div>;
 }
 
+
+function formatDate(value) {
+  if (!value) return "Time unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleString();
+}
+
+function displayKind(value) {
+  return String(value || "other").replaceAll("_", " ");
+}
+
+function ruleDetails(finding) {
+  const snapshot = finding?.evidence_snapshot && typeof finding.evidence_snapshot === "object"
+    ? finding.evidence_snapshot
+    : {};
+  const ruleId = finding?.rule ?? finding?.rule_id ?? null;
+  const code = snapshot.code || snapshot.rule_code || "";
+  const phrase = snapshot.phrase || snapshot.rule_phrase || "";
+
+  if (code || ruleId != null) {
+    const key = code ? `rule-code:${code}` : `rule-id:${ruleId}`;
+    const title = code ? `${code}${phrase ? ` · ${phrase}` : ""}` : `Rule #${ruleId}`;
+    return { key, title, code, phrase, linked: true };
+  }
+
+  return {
+    key: `unlinked:${finding?.kind || "other"}`,
+    title: `No linked rule · ${displayKind(finding?.kind)}`,
+    code: "",
+    phrase: "",
+    linked: false,
+  };
+}
+
+function buildInsightData(savedDrafts) {
+  const drafts = Array.isArray(savedDrafts) ? savedDrafts : [];
+  const findings = drafts.flatMap((draft) =>
+    (Array.isArray(draft.findings) ? draft.findings : []).map((finding) => ({
+      ...finding,
+      draftId: draft.id,
+      draftTitle: draft.title,
+    })),
+  );
+  const decisions = drafts.flatMap((draft) =>
+    (Array.isArray(draft.decisions) ? draft.decisions : []).map((decision) => ({
+      ...decision,
+      draftId: draft.id,
+      draftTitle: draft.title,
+    })),
+  );
+
+  // A finding can become obsolete after a Creator revises a draft. Keep it in
+  // historical totals so earlier guideline violations remain visible.
+  const dismissedFindingIds = new Set(
+    findings
+      .filter((finding) => finding.state === "dismissed")
+      .map((finding) => String(finding.id)),
+  );
+  decisions
+    .filter((decision) => decision.action === "dismissed" && decision.finding != null)
+    .forEach((decision) => dismissedFindingIds.add(String(decision.finding)));
+
+  const ruleGroups = new Map();
+  findings.forEach((finding) => {
+    const details = ruleDetails(finding);
+    const group = ruleGroups.get(details.key) || {
+      ...details,
+      occurrences: 0,
+      active: 0,
+      dismissedIds: new Set(),
+    };
+    group.occurrences += 1;
+    if (finding.state !== "obsolete" && ["open", "acknowledged"].includes(finding.state)) {
+      group.active += 1;
+    }
+    if (dismissedFindingIds.has(String(finding.id))) {
+      group.dismissedIds.add(String(finding.id));
+    }
+    ruleGroups.set(details.key, group);
+  });
+
+  const recurringRules = [...ruleGroups.values()]
+    .map((group) => ({
+      ...group,
+      dismissed: group.dismissedIds.size,
+      dismissalRate: group.occurrences
+        ? Math.round((group.dismissedIds.size / group.occurrences) * 100)
+        : 0,
+    }))
+    .filter((group) => group.linked)
+    .sort((a, b) => b.occurrences - a.occurrences || b.dismissed - a.dismissed)
+    .slice(0, 8);
+
+  const issueGroups = new Map();
+  findings.forEach((finding) => {
+    const kind = finding.kind || "other";
+    const group = issueGroups.get(kind) || { kind, occurrences: 0, dismissedIds: new Set() };
+    group.occurrences += 1;
+    if (dismissedFindingIds.has(String(finding.id))) {
+      group.dismissedIds.add(String(finding.id));
+    }
+    issueGroups.set(kind, group);
+  });
+  const dismissalPatterns = [...issueGroups.values()]
+    .map((group) => ({
+      ...group,
+      dismissed: group.dismissedIds.size,
+      dismissalRate: group.occurrences
+        ? Math.round((group.dismissedIds.size / group.occurrences) * 100)
+        : 0,
+    }))
+    .filter((group) => group.dismissed > 0)
+    .sort((a, b) => b.dismissed - a.dismissed || b.dismissalRate - a.dismissalRate);
+
+  return {
+    drafts,
+    findings,
+    decisions,
+    currentUnresolved: findings.filter(
+      (finding) => finding.state !== "obsolete" && ["open", "acknowledged"].includes(finding.state),
+    ).length,
+    recurringRules,
+    dismissalPatterns,
+    approved: decisions.filter((decision) => decision.action === "approved").length,
+    changesRequested: decisions.filter((decision) => decision.action === "changes_requested").length,
+    rejected: decisions.filter((decision) => decision.action === "rejected").length,
+    dismissed: dismissedFindingIds.size,
+  };
+}
+
+function ReviewerInsights({ savedDrafts, onRefresh, loading }) {
+  const metrics = useMemo(() => buildInsightData(savedDrafts), [savedDrafts]);
+
+  return (
+    <section className="view">
+      <div className="page-head">
+        <div>
+          <div className="eyebrow"><i /> GOVERNANCE / CONTINUOUS IMPROVEMENT</div>
+          <h1>Guideline insights</h1>
+          <p>Recurring guideline issues and reviewer decisions across accessible drafts and their saved versions.</p>
+        </div>
+        <button className="secondary-button" onClick={onRefresh} disabled={loading}>
+          <RefreshCw size={14} /> Refresh metrics
+        </button>
+      </div>
+
+      <div className="insight-hero">
+        <span><Activity size={15} /> LIVE WORKSPACE METRICS</span>
+        <h2>{metrics.findings.length ? "Recurring issues, including earlier revisions." : "Your review data will appear here."}</h2>
+        <p>
+          {metrics.findings.length
+            ? `${metrics.findings.length} finding records across ${metrics.drafts.length} accessible drafts, including findings retained from older versions.`
+            : "Run a backend review and record reviewer decisions to populate these metrics. No illustrative counts are shown."}
+        </p>
+        <div className="big-number">{metrics.currentUnresolved}<small>currently unresolved</small></div>
+      </div>
+
+      <div className="stats">
+        <div className="stat">
+          <div className="stat-label">Historical findings <span><History size={16} /></span></div>
+          <strong>{metrics.findings.length}</strong>
+          <small>Includes findings from previous versions</small>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Reviewer dismissals <span><ShieldCheck size={16} /></span></div>
+          <strong>{metrics.dismissed}</strong>
+          <small>Finding-level dismissals recorded in the audit history</small>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Drafts reviewed <span><BookOpen size={16} /></span></div>
+          <strong>{metrics.drafts.length}</strong>
+          <small>Drafts accessible to this reviewer account</small>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Awaiting attention <span><Clock3 size={16} /></span></div>
+          <strong>{metrics.currentUnresolved}</strong>
+          <small>Open or acknowledged findings in current versions</small>
+        </div>
+      </div>
+
+      <div className="section-head">
+        <div>
+          <h2>Recurring guideline rules</h2>
+          <p>Rules are matched by their saved Rule record or evidence snapshot.</p>
+        </div>
+      </div>
+      <section className="panel table">
+        <div className="table-head"><b>Most frequently triggered rules</b><span>HISTORICAL FINDINGS</span></div>
+        {metrics.recurringRules.length ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr><th>GUIDELINE</th><th>OCCURRENCES</th><th>ACTIVE NOW</th><th>DISMISSED</th><th>DISMISSAL SHARE</th></tr>
+              </thead>
+              <tbody>
+                {metrics.recurringRules.map((rule) => (
+                  <tr key={rule.key}>
+                    <td><b>{rule.title}</b></td>
+                    <td>{rule.occurrences}</td>
+                    <td>{rule.active}</td>
+                    <td>{rule.dismissed}</td>
+                    <td>{rule.dismissalRate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty"><b>No linked rule findings yet</b><p>Rule-level patterns will appear when findings are linked to a saved guideline record.</p></div>
+        )}
+      </section>
+
+      <div className="section-head">
+        <div>
+          <h2>Reviewer dismissal patterns</h2>
+          <p>Finding types that reviewers have dismissed, including decisions preserved from earlier versions.</p>
+        </div>
+      </div>
+      <section className="panel table">
+        <div className="table-head"><b>Dismissals by finding type</b><span>RECORDED DECISIONS</span></div>
+        {metrics.dismissalPatterns.length ? (
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>FINDING TYPE</th><th>TOTAL OCCURRENCES</th><th>DISMISSED</th><th>DISMISSAL SHARE</th></tr></thead>
+              <tbody>
+                {metrics.dismissalPatterns.map((group) => (
+                  <tr key={group.kind}>
+                    <td><b>{displayKind(group.kind)}</b></td>
+                    <td>{group.occurrences}</td>
+                    <td>{group.dismissed}</td>
+                    <td>{group.dismissalRate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty"><b>No finding dismissals recorded</b><p>Reviewer dismissals will be summarized here when they are saved.</p></div>
+        )}
+      </section>
+
+      <div className="section-head"><div><h2>Review outcomes</h2><p>Persisted draft-level decisions, not browser-session events.</p></div></div>
+      <div className="stats">
+        {[{ label: "Approved", count: metrics.approved }, { label: "Changes requested", count: metrics.changesRequested }, { label: "Rejected", count: metrics.rejected }, { label: "Finding dismissals", count: metrics.dismissed }].map((metric) => (
+          <div className="stat" key={metric.label}>
+            <div className="stat-label">{metric.label}</div>
+            <strong>{metric.count}</strong>
+            <small>Recorded in backend history</small>
+          </div>
+        ))}
+      </div>
+      <p className="disclaimer"><AlertTriangle size={14} /> A dismissal is a reviewer decision, not automatic proof of a false positive. Metrics cover only drafts visible to this account and are not guaranteed to be organization-wide.</p>
+    </section>
+  );
+}
+
+function buildAuditEvents(savedDrafts) {
+  const drafts = Array.isArray(savedDrafts) ? savedDrafts : [];
+  return drafts.flatMap((draft) => {
+    const findingsById = new Map(
+      (Array.isArray(draft.findings) ? draft.findings : []).map((finding) => [String(finding.id), finding]),
+    );
+    const decisionEvents = (Array.isArray(draft.decisions) ? draft.decisions : []).filter((decision) => decision.action !== "revised").map((decision) => ({
+      ...decision,
+      draftTitle: draft.title,
+      draftId: draft.id,
+      eventType: "decision",
+      findingDetails: decision.finding != null ? findingsById.get(String(decision.finding)) || null : null,
+    }));
+    const versionEvents = (Array.isArray(draft.versions) ? draft.versions : []).map((version) => ({
+      id: `version-${draft.id}-${version.version}`,
+      action: `version_${version.version}`,
+      comment: `Version ${version.version} saved`,
+      actor_name: version.editor_name,
+      created_at: version.created_at,
+      draftTitle: draft.title,
+      draftId: draft.id,
+      eventType: "version",
+      version: version.version,
+    }));
+    return [...decisionEvents, ...versionEvents];
+  }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+}
+
+function ReviewerAuditTrail({ savedDrafts, onRefresh, loading, onReviewCreatorChanges }) {
+  const events = useMemo(() => buildAuditEvents(savedDrafts), [savedDrafts]);
+
+  return (
+    <section className="view">
+      <div className="page-head">
+        <div>
+          <div className="eyebrow"><i /> GOVERNANCE / ACCOUNTABILITY</div>
+          <h1>Audit trail</h1>
+          <p>Saved draft versions and reviewer decisions, with the related finding details when a decision concerns a finding.</p>
+        </div>
+        <div className="head-buttons">
+          <button className="secondary-button" onClick={onReviewCreatorChanges}>Review creator changes</button>
+          <button className="secondary-button" onClick={onRefresh} disabled={loading}><RefreshCw size={14} /> Refresh history</button>
+        </div>
+      </div>
+
+      <div className="intro-card">
+        <History size={24} />
+        <span><b>Traceable by design</b><small>Each event shows the actor, time, draft, and—where applicable—the exact finding connected to the decision.</small></span>
+        <span className="pill">{events.length} events</span>
+      </div>
+
+      <section className="panel audit">
+        <div className="panel-head"><div><h3>Recent activity</h3><p>Newest persisted events first</p></div><span className="pill">Backend history</span></div>
+        {events.slice(0, 100).map((event, index) => (
+          <article className="audit-row" key={`${event.eventType}-${event.id}-${event.created_at || index}`}>
+            <span><History size={15} /></span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <b>{event.eventType === "version" ? `Version ${event.version} saved` : displayKind(event.action)}</b>
+              <p>{event.draftTitle || `Draft ${event.draftId}`}</p>
+              {event.findingDetails && (
+                <div style={{ margin: "8px 0", padding: "10px 12px", borderRadius: "9px", background: "rgba(127,152,232,.08)", border: "1px solid var(--border, #30394b)" }}>
+                  <b style={{ display: "block", fontSize: "11px", textTransform: "uppercase" }}>Related finding · {displayKind(event.findingDetails.kind)}</b>
+                  <p style={{ margin: "5px 0", fontSize: "12px" }}>Flagged text: “{event.findingDetails.excerpt || "Excerpt unavailable"}”</p>
+                  {event.findingDetails.reason && <small style={{ display: "block", opacity: .8 }}>{event.findingDetails.reason}</small>}
+                </div>
+              )}
+              {event.comment && event.eventType === "decision" && <p><b>Reviewer comment:</b> {event.comment}</p>}
+              {event.eventType === "version" && <p>{event.comment}</p>}
+              <small>{event.actor_name || "Unknown actor"} · {formatDate(event.created_at)}</small>
+            </div>
+            <code>{event.eventType === "version" ? "VERSION" : "DECISION"}</code>
+          </article>
+        ))}
+        {!events.length && <div className="empty"><span><History size={29} /></span><b>No audit events yet</b><p>Save a draft revision or record a reviewer decision to create persistent history.</p></div>}
+      </section>
+    </section>
+  );
+}
 
 function ClaimsLedgerView({isStaff, selectedBrandId}){
   const [facts, setFacts] = useState([]);
@@ -1071,9 +1405,22 @@ return <div className={`app theme-${theme}`}>
 {isStaff&&guidelineBrandId&&<section className="panel" style={{padding:18,marginBottom:18}}><h3 style={{marginTop:0}}>{editingGuidelineId?"Edit guideline":"Add guideline"}</h3><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10}}><input placeholder="Code (e.g. R-14)" value={guidelineForm.code} onChange={e=>setGuidelineForm(f=>({...f,code:e.target.value}))}/><input placeholder="Prohibited phrase" value={guidelineForm.phrase} onChange={e=>setGuidelineForm(f=>({...f,phrase:e.target.value}))}/><input placeholder="Safe replacement (optional)" value={guidelineForm.replacement} onChange={e=>setGuidelineForm(f=>({...f,replacement:e.target.value}))}/><input placeholder="Source" value={guidelineForm.source} onChange={e=>setGuidelineForm(f=>({...f,source:e.target.value}))}/></div><textarea placeholder="Explain the guideline and why it matters" value={guidelineForm.explanation} onChange={e=>setGuidelineForm(f=>({...f,explanation:e.target.value}))} rows={3} style={{width:"100%",boxSizing:"border-box",marginTop:10}}/><div style={{display:"flex",gap:8,marginTop:10}}><Btn kind="primary" onClick={saveGuideline}><Check size={14}/> {editingGuidelineId?"Update guideline":"Add guideline"}</Btn>{editingGuidelineId&&<Btn onClick={()=>{setEditingGuidelineId(null);setGuidelineForm({code:"",phrase:"",replacement:"",explanation:"",source:"Brand style guide"});}}>Cancel</Btn>}</div></section>}
 {guidelineKnowledgeError&&<p className="disclaimer"><AlertTriangle size={14}/>{guidelineKnowledgeError}</p>}<div className="guides">{guidelineKnowledgeData.rules.map(rule=><section className="panel guide" key={rule.id}><span className="guide-icon red"><ShieldAlert size={19}/></span><h3>{rule.code}: {rule.phrase}</h3><p>{rule.explanation}</p><small><BookOpen size={12}/>{rule.source||"Brand style guide"}</small><small><Check size={12}/>{rule.replacement?`Suggested replacement: ${rule.replacement}`:"Human review required; no automatic replacement is configured."}</small>{isStaff&&<div style={{display:"flex",gap:8,marginTop:12}}><Btn onClick={()=>{setEditingGuidelineId(rule.id);setGuidelineForm({code:rule.code||"",phrase:rule.phrase||"",replacement:rule.replacement||"",explanation:rule.explanation||"",source:rule.source||"Brand style guide"});window.scrollTo({top:0,behavior:"smooth"});}}>Edit</Btn><Btn kind="reject" onClick={async()=>{if(!confirm(`Delete guideline ${rule.code}?`))return;try{await api.deleteGuideline(rule.id);await reloadKnowledge();setToast("Guideline deleted.");}catch(error){setToast(error.message||"Could not delete guideline.");}}}><Trash2 size={13}/> Delete</Btn></div>}</section>)}</div>{!guidelineKnowledgeLoading&&!guidelineKnowledgeData.rules.length&&<section className="panel empty"><b>No guidelines for this brand yet</b><p>{isStaff?"Add the first guideline for this brand.":"The reviewer has not added guidelines to this brand."}</p></section>}<p className="disclaimer"><Shield size={14}/>{isStaff?"You own this brand's guidelines. Creator accounts can view them but cannot modify them.":"Guidelines are read-only for Creators. Only the owning Reviewer can modify them."}</p></motion.section>}
 
-{isStaff&&page==="insights"&&<motion.section key="insights" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / CONTINUOUS IMPROVEMENT</div><h1>Guideline insights</h1><p>Patterns calculated from persisted findings and reviewer decisions across accessible drafts.</p></div><Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}><RefreshCw size={14}/> Refresh metrics</Btn></div><div className="insight-hero"><span><Activity size={15}/> LIVE WORKSPACE METRICS</span><h2>{allFindings.length ? "Review patterns, grounded in real activity." : "Your review data will appear here."}</h2><p>{allFindings.length ? `${allFindings.length} finding records across ${savedDrafts.length} accessible drafts. ${allDecisions.filter(item=>item.action==="dismissed").length} findings have been dismissed by a reviewer.` : "Run a backend review and record reviewer decisions to populate these metrics. No illustrative counts are shown."}</p><div className="big-number">{allFindings.filter(item=>item.state==="open"||item.state==="acknowledged").length}<small>open / acknowledged</small></div></div><div className="section-head"><div><h2>Most frequent finding types</h2><p>Counts exclude obsolete findings from older versions.</p></div><Pill>{allFindings.length} findings</Pill></div><div className="insight-cards">{topFindingPatterns.map(([kind,count],i)=><section className="panel insight-card" key={kind}><code>{String(i+1).padStart(2,"0")}</code><small>{count} occurrence{count===1?"":"s"}</small><h3>{kind.replaceAll("_"," ")}</h3><p>{allFindings.filter(item=>item.kind===kind&&(item.state==="open"||item.state==="acknowledged")).length} currently unresolved; {allFindings.filter(item=>item.kind===kind&&item.state==="dismissed").length} dismissed by reviewers.</p></section>)}</div>{!topFindingPatterns.length&&<section className="panel empty"><b>No findings recorded yet</b><p>Once drafts have been reviewed, recurring issues will be calculated from the saved records.</p></section>}<div className="section-head"><div><h2>Review outcomes</h2><p>Persisted reviewer decisions, not browser-session events.</p></div></div><div className="stats">{[{label:"Approved",count:allDecisions.filter(item=>item.action==="approved").length},{label:"Changes requested",count:allDecisions.filter(item=>item.action==="changes_requested").length},{label:"Rejected",count:allDecisions.filter(item=>item.action==="rejected").length},{label:"Dismissed findings",count:allDecisions.filter(item=>item.action==="dismissed").length}].map(metric=><div className="stat" key={metric.label}><div className="stat-label">{metric.label}</div><strong>{metric.count}</strong><small>Recorded in backend</small></div>)}</div><p className="disclaimer"><Lightbulb size={14}/> These metrics describe the drafts available to your account; they are not a complete organization-wide report unless the reviewer account can access all relevant drafts.</p></motion.section>}
+{isStaff && page === "insights" && (
+  <ReviewerInsights
+    savedDrafts={savedDrafts}
+    onRefresh={refreshSavedDrafts}
+    loading={loadingSavedDrafts}
+  />
+)}
 
-{isStaff&&page==="audit"&&<motion.section key="audit" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / ACCOUNTABILITY</div><h1>Audit trail</h1><p>Persisted version and decision events returned by Django.</p></div><Btn onClick={()=>setPage("changes")}><GitCompareArrows size={14}/> Review creator changes</Btn><Btn onClick={refreshSavedDrafts} disabled={loadingSavedDrafts}><RefreshCw size={14}/> Refresh history</Btn></div><div className="intro-card"><History size={24}/><span><b>Traceable by design</b><small>Events below come from stored draft versions and reviewer decisions.</small></span><Pill>{auditEvents.length} events</Pill></div><section className="panel audit"><div className="panel-head"><div><h3>Recent activity</h3><p>Newest persisted events first</p></div><Pill>Backend history</Pill></div>{auditEvents.slice(0,100).map((event,index)=><div className="audit-row" key={`${event.eventType}-${event.id}-${event.created_at||index}`}><span><History size={15}/></span><div><b>{event.eventType==="version"?`Version ${event.version} saved`:event.action.replaceAll("_"," ")}</b><p>{event.draftTitle||`Draft ${event.draftId}`} · {event.comment||"No reviewer comment recorded."}</p><small>{event.actor_name||"Unknown actor"} · {event.created_at?new Date(event.created_at).toLocaleString():"Time unavailable"}</small></div><code>{event.eventType==="version"?"VERSION":"DECISION"}</code></div>)}{!auditEvents.length&&<div className="empty"><span><History size={29}/></span><b>No audit events yet</b><p>Save a draft revision or record a reviewer decision to create persistent history.</p></div>}</section></motion.section>}
+{isStaff && page === "audit" && (
+  <ReviewerAuditTrail
+    savedDrafts={savedDrafts}
+    onRefresh={refreshSavedDrafts}
+    loading={loadingSavedDrafts}
+    onReviewCreatorChanges={() => setPage("changes")}
+  />
+)}
 
 {isStaff&&page==="changes"&&<motion.section key="changes" className="view" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0}}><div className="page-head"><div><div className="eyebrow"><i/> GOVERNANCE / CHANGE REVIEW</div><h1>Creator changes</h1><p>Compare the latest creator revision with the previous version. Include or exclude individual changes, then apply the selected changes to the draft.</p></div><Btn onClick={()=>loadCreatorChanges()} disabled={changesLoading}><RefreshCw size={14}/> Refresh comparison</Btn></div><section className="panel" style={{padding:18,marginBottom:16}}><label style={{display:"block",fontWeight:700,marginBottom:8}}>Draft to compare</label><div style={{display:"flex",gap:10,flexWrap:"wrap"}}><select value={changeDraftId} onChange={e=>{setChangeDraftId(e.target.value);setDraftChanges(null);}} style={{padding:10,minWidth:260,flex:1}}><option value="">Choose a draft</option>{savedDrafts.map(item=><option key={item.id} value={item.id}>{item.title} · {item.status}</option>)}</select><Btn kind="primary" onClick={()=>loadCreatorChanges()} disabled={!changeDraftId||changesLoading}>View changes</Btn></div></section>{draftChanges&&<><div className="intro-card"><GitCompareArrows size={22}/><span><b>Version {draftChanges.from_version||"—"} → Version {draftChanges.to_version||"—"}</b><small>Select the changes you want to retain in the resulting draft. Excluded changes revert to the previous version's text.</small></span><Pill>{draftChanges.changes?.length||0} changes</Pill></div>{draftChanges.changes?.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"14px 0"}}><Btn onClick={()=>setIncludedChangeIndexes((draftChanges.changes||[]).map(c=>c.index))}><CheckCheck size={14}/> Include all</Btn><Btn onClick={()=>setIncludedChangeIndexes([])}><X size={14}/> Exclude all</Btn><Btn kind="primary" onClick={applySelectedChanges} disabled={changesLoading}><Check size={14}/> Apply selected changes to draft</Btn></div>}<div style={{display:"grid",gap:12}}>{(draftChanges.changes||[]).map(change=><section className="panel" key={change.index} style={{padding:16,border:includedChangeIndexes.includes(change.index)?"1px solid var(--accent, #7f98e8)":"1px solid var(--border, #333)"}}><label style={{display:"flex",alignItems:"center",gap:10,fontWeight:700,marginBottom:12}}><input type="checkbox" checked={includedChangeIndexes.includes(change.index)} onChange={e=>setIncludedChangeIndexes(list=>e.target.checked?[...list,change.index]:list.filter(i=>i!==change.index))}/> Change {change.index+1} · {change.kind} {includedChangeIndexes.includes(change.index)?"(included)":"(excluded)"}</label>{change.related_findings?.length>0&&<div style={{marginBottom:10,padding:10,borderRadius:8,background:"rgba(232,180,91,.08)"}}><small style={{display:"block",fontWeight:800,marginBottom:6}}>RELATED FINDINGS</small>{change.related_findings.map(f=><div key={f.id} style={{fontSize:12,marginBottom:6}}><b>{f.kind.replaceAll("_"," ")}</b> — {f.reason}<div style={{opacity:.8}}>Flagged excerpt: “{f.excerpt}”</div></div>)}</div>}{(!change.related_findings||!change.related_findings.length)&&<small style={{display:"block",marginBottom:10,opacity:.7}}>No finding could be matched automatically; review this text change manually.</small>}<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:12}}><div><small style={{display:"block",marginBottom:6,color:"var(--muted)"}}>PREVIOUS TEXT</small><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",padding:12,borderRadius:8,background:"rgba(220,80,80,.08)",minHeight:45}}>{change.before||"(no text)"}</pre></div><div><small style={{display:"block",marginBottom:6,color:"var(--muted)"}}>CREATOR'S UPDATED TEXT</small><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",padding:12,borderRadius:8,background:"rgba(70,180,130,.08)",minHeight:45}}>{change.after||"(removed)"}</pre></div></div></section>)}</div>{!draftChanges.changes?.length&&<section className="panel empty"><b>No differences found</b><p>This draft has no line-level changes between its latest two versions.</p></section>}</>}</motion.section>}
 
