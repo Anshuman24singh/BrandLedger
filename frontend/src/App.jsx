@@ -1,6 +1,6 @@
 import React,{useState,useEffect,useRef}from"react";import{AnimatePresence,motion}from"framer-motion";import{ShieldCheck,Shield,BadgeCheck,Home,FileCheck2,Layers3,BookOpen,Lightbulb,History,Plus,Search,Bell,Sun,Moon,ChevronRight,ChevronDown,ArrowRight,ArrowUpRight,Clock3,ShieldAlert,Flag,Sparkles,Check,CheckCheck,LockKeyhole,FileText,Filter,PanelRightClose,GitCompareArrows,ThumbsUp,ThumbsDown,X,Menu,Command,Activity,Settings2,Send,Gauge,MoreHorizontal,LogOut,FolderOpen,RefreshCw,Trash2,Square,CheckSquare,AlertTriangle}from"lucide-react";import{api}from"./lib/api.js";
 
-const seed="Introducing PayNest Smart Savings. Our savings rate is 7%. Returns are guaranteed and risk-free. Please review the current approved rate and product terms before publication.";
+const seed="";
 
 const nav=[["overview","Dashboard",Home],["reviews","My drafts",FileCheck2],["claims","Claims ledger",Layers3],["guidelines","Brand guidelines",BookOpen],["insights","Guideline insights",Lightbulb],["audit","Audit trail",History],["changes","Creator changes",GitCompareArrows]];
 
@@ -171,7 +171,7 @@ function ClaimsLedgerView({isStaff, selectedBrandId}){
     <section className="panel table"><div className="table-head"><b>Approved and historical facts</b><span>{loading?"LOADING…":"LIVE BACKEND DATA"}</span></div>
       <div className="table-scroll"><table><thead><tr><th>FACT</th><th>VALUE</th><th>STATUS</th><th>EFFECTIVE DATE</th><th>SOURCE</th><th>ACTIONS / AUDIT</th></tr></thead><tbody>
       {facts.map(f=><tr key={f.id}><td><b>{f.key}</b></td><td>{f.value}</td><td><Pill tone={f.status==="approved"?"good":f.status==="withdrawn"?"warn":""}>{f.status}</Pill></td><td>{f.effective_date||"—"}</td><td>{f.source||"—"}</td><td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Btn onClick={()=>showAudit(f)}>History</Btn>{isStaff&&f.status==="approved"&&<><Btn onClick={()=>startEdit(f)} disabled={saving}><Check size={12}/> Edit</Btn><Btn onClick={()=>withdrawFact(f)} disabled={saving}><Trash2 size={12}/> Withdraw</Btn></>}</div></td></tr>)}
-      </tbody></table></div>{!loading&&!facts.length&&<p className="table-foot">No facts returned by the backend. Select a brand or load demo facts.</p>}
+      </tbody></table></div>{!loading&&!facts.length&&<p className="table-foot">No approved claims found for this brand. Add a claim when verified source information is available.</p>}
       <p className="table-foot">{isStaff?"Only the owning Reviewer can add, edit, or withdraw facts. Withdrawn and superseded records remain available for audit.":"Read-only view. Only the owning Reviewer can change facts."}</p>
     </section>
     {auditFact&&<section className="panel" style={{padding:18,marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}><h3 style={{margin:0}}>Audit history · {auditFact.key}</h3><Btn onClick={()=>setAuditFact(null)}><X size={14}/> Close</Btn></div>
@@ -185,7 +185,7 @@ function ClaimsLedgerView({isStaff, selectedBrandId}){
 
 export default function App(){
 
-const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=sessionStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(seed),[original]=useState(seed),[title,setTitle]=useState("PayNest Smart Savings — launch campaign"),[campaign,setCampaign]=useState("Q4 Savings Launch"),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([{name:"Version 1",text:seed,time:"Just now"}]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>sessionStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>sessionStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>sessionStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false),[notificationOpen,setNotificationOpen]=useState(false),[readNotificationIds,setReadNotificationIds]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`bl-notifications-read:${sessionStorage.getItem("bl-username")||"guest"}:${sessionStorage.getItem("bl-is-staff")==="true"?"reviewer":"creator"}`)||"[]")}catch{return []}});
+const[theme,setTheme]=useState(()=>localStorage.getItem("bl-theme")||"dark"),[page,setPage]=useState(()=>{const saved=sessionStorage.getItem("bl-page");return nav.some(n=>n[0]===saved)?saved:"overview"}),[draft,setDraft]=useState(""),[original]=useState(""),[title,setTitle]=useState(""),[campaign,setCampaign]=useState(""),[findings,setFindings]=useState([]),[active,setActive]=useState(null),[resolved,setResolved]=useState([]),[status,setStatus]=useState("Not reviewed"),[busy,setBusy]=useState(false),[toast,setToast]=useState(""),[versions,setVersions]=useState([]),[history,setHistory]=useState(false),[comment,setComment]=useState(""),[decision,setDecision]=useState(""),[showEvidence,setShowEvidence]=useState(true),[search,setSearch]=useState(false),[mobile,setMobile]=useState(false),[workspaceOpen,setWorkspaceOpen]=useState(false),[profileOpen,setProfileOpen]=useState(false),[authenticated,setAuthenticated]=useState(()=>api.authenticated),[currentUsername,setCurrentUsername]=useState(()=>sessionStorage.getItem("bl-username")||""),[isStaff,setIsStaff]=useState(()=>sessionStorage.getItem("bl-is-staff")==="true"),[loginUsername,setLoginUsername]=useState(""),[loginPassword,setLoginPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(""),[backendDraftId,setBackendDraftId]=useState(()=>sessionStorage.getItem("bl-last-draft-id")),[savedDrafts,setSavedDrafts]=useState([]),[loadingSavedDrafts,setLoadingSavedDrafts]=useState(false),[showAllSavedDrafts,setShowAllSavedDrafts]=useState(false),[savedDraftSearch,setSavedDraftSearch]=useState(""),[selectedDraftIds,setSelectedDraftIds]=useState([]),[deletingDrafts,setDeletingDrafts]=useState(false),[notificationOpen,setNotificationOpen]=useState(false),[readNotificationIds,setReadNotificationIds]=useState(()=>{try{return JSON.parse(sessionStorage.getItem(`bl-notifications-read:${sessionStorage.getItem("bl-username")||"guest"}:${sessionStorage.getItem("bl-is-staff")==="true"?"reviewer":"creator"}`)||"[]")}catch{return []}});
 const notificationRef=useRef(null),workspaceRef=useRef(null),profileRef=useRef(null),refreshInFlightRef=useRef(false);
 const [knowledgeData,setKnowledgeData]=useState({facts:[],rules:[]});
 const [knowledgeLoading,setKnowledgeLoading]=useState(false);
@@ -344,7 +344,25 @@ useEffect(()=>{
       }
     }
   }
-  api.listBrands().then(items=>{if(!cancelled){setBrands(Array.isArray(items)?items:[]);if(!selectedBrandId && items?.length){setSelectedBrandId(String(items[0].id));sessionStorage.setItem("bl-brand-id",String(items[0].id));}if(!guidelineBrandId && items?.length){setGuidelineBrandId(String(items[0].id));sessionStorage.setItem("bl-guideline-brand-id",String(items[0].id));}}}).catch(error=>console.error("Could not load brands:",error));
+  api.listBrands().then(items=>{
+    if(cancelled) return;
+    const loadedBrands = Array.isArray(items) ? items : [];
+    setBrands(loadedBrands);
+    const selectedExists = loadedBrands.some(brand => String(brand.id) === String(selectedBrandId));
+    if(!selectedExists){
+      const nextBrandId = loadedBrands.length ? String(loadedBrands[0].id) : "";
+      setSelectedBrandId(nextBrandId);
+      if(nextBrandId) sessionStorage.setItem("bl-brand-id", nextBrandId);
+      else sessionStorage.removeItem("bl-brand-id");
+    }
+    const guidelineExists = loadedBrands.some(brand => String(brand.id) === String(guidelineBrandId));
+    if(!guidelineExists){
+      const nextGuidelineBrandId = loadedBrands.length ? String(loadedBrands[0].id) : "";
+      setGuidelineBrandId(nextGuidelineBrandId);
+      if(nextGuidelineBrandId) sessionStorage.setItem("bl-guideline-brand-id", nextGuidelineBrandId);
+      else sessionStorage.removeItem("bl-guideline-brand-id");
+    }
+  }).catch(error=>console.error("Could not load brands:",error));
   loadWorkspace();
   return ()=>{cancelled = true;};
 },[authenticated,selectedBrandId]);
@@ -701,7 +719,7 @@ const findingCounts = allFindings.reduce((counts,item) => { const key=item.kind 
 const topFindingPatterns = Object.entries(findingCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
 const auditEvents = savedDrafts.flatMap(item => [
   ...(Array.isArray(item.decisions)?item.decisions.map(event=>({...event,draftTitle:item.title,draftId:item.id,eventType:"decision"})):[]),
-  ...(Array.isArray(item.versions)?item.versions.map(event=>({id:`version-${item.id}-${event.version}`,action:`version_${event.version}`,comment:`Version ${event.version} saved`,actor_name:event.editor_name,created_at:event.created_at,draftTitle:item.title,draftId:item.id,eventType:"version"})):[]),
+  ...(Array.isArray(item.versions)?item.versions.map(event=>({id:`version-${item.id}-${event.version}`,action:`version_${event.version}`,comment:`Version ${event.version ?? "unknown"} saved`,actor_name:event.editor_name,created_at:event.created_at,draftTitle:item.title,draftId:item.id,eventType:"version"})):[]),
 ]).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
 const notifications = (isStaff
   ? savedDrafts.filter(item => item.status === "in_review").map(item => ({
