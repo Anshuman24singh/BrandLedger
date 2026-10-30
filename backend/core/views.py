@@ -197,6 +197,7 @@ def login(request):
     return Response({
         "token": token.key,
         "username": user.username,
+        "user_id": user.id,
         "is_staff": user.is_staff,
     })
 
@@ -250,7 +251,23 @@ def knowledge(request):
 @permission_classes([IsAuthenticated])
 def drafts(request):
     if request.method == "GET":
-        queryset = accessible_drafts(request.user).order_by("-created_at")
+        queryset = accessible_drafts(request.user)
+        brand_id = request.query_params.get("brand_id")
+
+        if brand_id:
+            brand = get_object_or_404(Brand, pk=brand_id)
+            if not request.user.is_staff and not (
+                brand.created_by.is_staff
+                or brand.created_by_id == request.user.id
+                or brand.members.filter(pk=request.user.pk).exists()
+            ):
+                return Response(
+                    {"error": "You do not have access to this brand."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            queryset = queryset.filter(brand_id=brand_id)
+
+        queryset = queryset.order_by("-created_at")
         return Response(DraftSerializer(queryset, many=True).data)
 
     title = str(request.data.get("title", "")).strip()[:200]
@@ -336,13 +353,13 @@ def draft_detail(request, pk):
 
     if draft.status == "approved":
         return Response(
-            {
-                "error": (
-                    "Approved drafts are protected to preserve compliance "
-                    "history. Archive support can be added separately."
-                )
-            },
-            status=status.HTTP_400_BAD_REQUEST,
+        {
+            "error": (
+                "Approved drafts are protected to preserve compliance "
+                "history. Archive support can be added separately."
+            )
+        },
+        status=status.HTTP_403_FORBIDDEN,
         )
 
     title = draft.title

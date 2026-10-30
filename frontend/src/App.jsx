@@ -587,7 +587,7 @@ async function refreshSavedDrafts(){
   refreshInFlightRef.current=true;
   setLoadingSavedDrafts(true);
   try {
-    const response = await api.listDrafts();
+    const response = await api.listDrafts(selectedBrandId || null);
     const items = Array.isArray(response) ? response : (response?.results || response?.drafts || []);
     setSavedDrafts(items);
   } catch(error) {
@@ -609,14 +609,29 @@ useEffect(()=>{
     window.removeEventListener("focus",refreshIfVisible);
     document.removeEventListener("visibilitychange",refreshIfVisible);
   };
-},[authenticated]);
+},[authenticated, selectedBrandId]);
 
 function toggleDraftSelection(id){
   setSelectedDraftIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
 }
 
-function selectableDrafts(items=savedDrafts){
-  return items.filter(item => item.status !== "approved");
+function selectableDrafts(items = savedDrafts) {
+  const currentUserId = Number(sessionStorage.getItem("bl-user-id"));
+  const currentUsername = sessionStorage.getItem("bl-username");
+
+  return items.filter(item => {
+    // Approved drafts are protected and must never be selectable for deletion.
+    if (item.status === "approved") return false;
+
+    if (currentUserId) {
+      return Number(item.author_id) === currentUserId;
+    }
+
+    // Compatibility fallback for sessions created before user_id was stored.
+    return Boolean(
+      currentUsername && item.author_name === currentUsername
+    );
+  });
 }
 
 function selectAllVisibleDrafts(items){
@@ -626,13 +641,14 @@ function selectAllVisibleDrafts(items){
 
 async function deleteSelectedDrafts(deleteAll=false){
   if(!authenticated || deletingDrafts) return;
-  const targets = deleteAll ? selectableDrafts(savedDrafts) : savedDrafts.filter(item => selectedDraftIds.includes(item.id) && item.status !== "approved");
-  if(!targets.length){ setToast("Select at least one non-approved draft to delete."); return; }
-  const approvedCount = savedDrafts.filter(item => item.status === "approved").length;
+  const ownedDrafts = selectableDrafts(savedDrafts);
+  const targets = deleteAll
+    ? ownedDrafts
+    : ownedDrafts.filter(item => selectedDraftIds.includes(item.id));
+  if(!targets.length){ setToast("Select at least one draft authored by your account to delete."); return; }
   const message = deleteAll
-    ? `Delete all ${targets.length} non-approved draft(s)? Approved drafts (${approvedCount}) are protected. This permanently removes their versions, findings, and decision history.`
-    : `Delete ${targets.length} selected draft(s)? Approved drafts are protected. This permanently removes the selected drafts and their versions, findings, and decision history.`;
-  if(!window.confirm(message)) return;
+  ? `Delete all ${targets.length} eligible draft(s) authored by your account? Approved drafts are protected. This permanently removes their versions, findings, and decision history.`
+  : `Delete ${targets.length} selected eligible draft(s) authored by your account? Approved drafts are protected. This permanently removes the selected drafts and their versions, findings, and decision history.`;
   setDeletingDrafts(true);
   let deleted = 0;
   const errors = [];
@@ -665,7 +681,7 @@ useEffect(()=>{
     .finally(() => { if(!cancelled) setKnowledgeLoading(false); });
   async function loadWorkspace(){
     try {
-      const response = await api.listDrafts();
+      const response = await api.listDrafts(selectedBrandId || null);
       const items = Array.isArray(response) ? response : (response?.results || response?.drafts || []);
       if(!cancelled) setSavedDrafts(items);
     } catch(error) {
